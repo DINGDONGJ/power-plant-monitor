@@ -1,0 +1,514 @@
+package monitor
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"runtime"
+	"sort"
+	"sync"
+	"time"
+
+	"monitor-agent/buffer"
+	"monitor-agent/provider"
+	"monitor-agent/types"
+)
+
+// MultiMonitor 多进程监控器
+type MultiMonitor struct {
+	mu             sync.RWMutex
+	provider       provider.ProcProvider
+	targets        map[int32]*targetState // PID -> 状态
+	metricsBuffers map[int32]*buffer.RingBuffer[types.ProcessMetrics]
+	eventsBuffer   *buffer.RingBuffer[types.Event]
+	config         types.MultiMonitorConfig
+	running        bool
+	stopCh         chan struct{}
+	logFile        *os.File
+}
+
+type targetState struct {
+	target        types.MonitorTarget
+	cpuExceedCnt  int
+	memExceedCnt  int
+	lastRestart   time.Time
+	lastMetric    *types.ProcessMetrics
+	exitReported  bool // 是否已报告退出事件
+	restartCount  int  // 重启次数统计
+}
+
+func NewMultiMonitor(cfg types.MultiMonitorConfig, prov provider.ProcProvider) (*MultiMonitor, error) {
+	if cfg.SampleInterval <= 0 {
+		cfg.SampleInterval = 1
+	}
+	if cfg.MetricsBufferLen <= 0 {
+		cfg.MetricsBufferLen = 300 // 5分钟
+	}
+	if cfg.EventsBufferLen <= 0 {
+		cfg.EventsBufferLen = 100
+	}
+	if cfg.LogDir == "" {
+		cfg.LogDir = "logs"
+	}
+	os.MkdirAll(cfg.LogDir, 0755)
+
+	// 创建日志文件
+	logPath := fmt.Sprintf("%s/multi_monitor_%s.jsonl", cfg.LogDir, time.Now().Format("20060102_150405"))
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &MultiMonitor{
+		provider:       prov,
+		targets:        make(map[int32]*targetState),
+		metricsBuffers: make(map[int32]*buffer.RingBuffer[types.ProcessMetrics]),
+		eventsBuffer:   buffer.NewRingBuffer[types.Event](cfg.EventsBufferLen),
+		config:         cfg,
+		stopCh:         make(chan struct{}),
+		logFile:        logFile,
+	}
+
+	return m, nil
+}
+
+// AddTarget 添加监控目标
+func (m *MultiMonitor) AddTarget(target types.MonitorTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.targets[target.PID]; exists {
+		return fmt.Errorf("target PID %d already monitored", target.PID)
+	}
+
+	// 验证进程存在
+	if !m.provider.IsAlive(target.PID) {
+		return fmt.Errorf("process PID %d not found", target.PID)
+	}
+
+	// 立即获取一次指标
+	var initialMetric *types.ProcessMetrics
+	if met, err := m.provider.GetMetrics(target.PID); err == nil {
+		met.Timestamp = time.Now()
+		met.Alive = true
+		initialMetric = met
+	}
+
+	state := &targetState{target: target, lastMetric: initialMetric}
+	m.targets[target.PID] = state
+	
+	buf := buffer.NewRingBuffer[types.ProcessMetrics](m.config.MetricsBufferLen)
+	if initialMetric != nil {
+		buf.Push(*initialMetric)
+	}
+	m.metricsBuffers[target.PID] = buf
+
+	log.Printf("[INFO] Added monitor target: PID=%d Name=%s", target.PID, target.Name)
+	return nil
+}
+
+// RemoveTarget 移除监控目标
+func (m *MultiMonitor) RemoveTarget(pid int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.targets, pid)
+	delete(m.metricsBuffers, pid)
+	log.Printf("[INFO] Removed monitor target: PID=%d", pid)
+}
+
+// RemoveAllTargets 移除所有监控目标
+func (m *MultiMonitor) RemoveAllTargets() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.targets = make(map[int32]*targetState)
+	m.metricsBuffers = make(map[int32]*buffer.RingBuffer[types.ProcessMetrics])
+	log.Printf("[INFO] Removed all monitor targets")
+}
+
+// UpdateTarget 更新监控目标配置
+func (m *MultiMonitor) UpdateTarget(target types.MonitorTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	
+	state, exists := m.targets[target.PID]
+	if !exists {
+		return fmt.Errorf("target PID %d not found", target.PID)
+	}
+	
+	// 保留原有状态，只更新配置
+	state.target = target
+	log.Printf("[INFO] Updated monitor target: PID=%d Name=%s AutoRestart=%v CPUThreshold=%.2f", 
+		target.PID, target.Name, target.AutoRestart, target.CPUThreshold)
+	return nil
+}
+
+// GetTargetStats 获取目标统计信息
+func (m *MultiMonitor) GetTargetStats(pid int32) map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	state, exists := m.targets[pid]
+	if !exists {
+		return nil
+	}
+	
+	return map[string]interface{}{
+		"restart_count":   state.restartCount,
+		"last_restart":    state.lastRestart,
+		"cpu_exceed_cnt":  state.cpuExceedCnt,
+		"mem_exceed_cnt":  state.memExceedCnt,
+	}
+}
+
+// GetTargets 获取所有监控目标（按 PID 排序）
+func (m *MultiMonitor) GetTargets() []types.MonitorTarget {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	// 收集所有 PID 并排序
+	pids := make([]int32, 0, len(m.targets))
+	for pid := range m.targets {
+		pids = append(pids, pid)
+	}
+	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+	
+	// 按排序后的顺序返回
+	result := make([]types.MonitorTarget, 0, len(pids))
+	for _, pid := range pids {
+		result = append(result, m.targets[pid].target)
+	}
+	return result
+}
+
+// Start 启动监控
+func (m *MultiMonitor) Start() {
+	m.mu.Lock()
+	if m.running {
+		m.mu.Unlock()
+		return
+	}
+	m.running = true
+	
+	// 如果日志文件已关闭，重新创建
+	if m.logFile == nil {
+		logPath := fmt.Sprintf("%s/multi_monitor_%s.jsonl", m.config.LogDir, time.Now().Format("20060102_150405"))
+		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+			m.logFile = f
+		}
+	}
+	m.mu.Unlock()
+
+	go m.loop()
+	log.Printf("[INFO] MultiMonitor started")
+}
+
+// Stop 停止监控
+func (m *MultiMonitor) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.running {
+		return
+	}
+	m.running = false
+	close(m.stopCh)
+	m.stopCh = make(chan struct{}) // 重新创建 channel 以便下次启动
+	if m.logFile != nil {
+		m.logFile.Close()
+		m.logFile = nil
+	}
+	log.Printf("[INFO] MultiMonitor stopped")
+}
+
+func (m *MultiMonitor) loop() {
+	ticker := time.NewTicker(time.Duration(m.config.SampleInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.collectAll()
+		}
+	}
+}
+
+func (m *MultiMonitor) collectAll() {
+	m.mu.Lock()
+	pids := make([]int32, 0, len(m.targets))
+	for pid := range m.targets {
+		pids = append(pids, pid)
+	}
+	m.mu.Unlock()
+
+	for _, pid := range pids {
+		m.collectOne(pid)
+	}
+}
+
+func (m *MultiMonitor) collectOne(pid int32) {
+	m.mu.Lock()
+	state, exists := m.targets[pid]
+	if !exists {
+		m.mu.Unlock()
+		return
+	}
+	buf := m.metricsBuffers[pid]
+	target := state.target
+	m.mu.Unlock()
+
+	alive := m.provider.IsAlive(pid)
+	metric := types.ProcessMetrics{
+		Timestamp: time.Now(),
+		PID:       pid,
+		Alive:     alive,
+	}
+
+	if alive {
+		if met, err := m.provider.GetMetrics(pid); err == nil {
+			metric = *met
+			metric.Timestamp = time.Now()
+			metric.Alive = true
+		}
+		// 进程恢复运行，重置退出标记
+		m.mu.Lock()
+		state.exitReported = false
+		m.mu.Unlock()
+		
+		// 检查 CPU 阈值
+		if target.CPUThreshold > 0 && metric.CPUPct > target.CPUThreshold {
+			m.mu.Lock()
+			state.cpuExceedCnt++
+			exceedCnt := state.cpuExceedCnt
+			exceedLimit := target.CPUExceedCount
+			if exceedLimit <= 0 {
+				exceedLimit = 3 // 默认连续3次
+			}
+			m.mu.Unlock()
+			
+			if exceedCnt >= exceedLimit {
+				evt := types.Event{
+					Timestamp: time.Now(),
+					Type:      "cpu_threshold",
+					PID:       pid,
+					Name:      target.Name,
+					Message:   fmt.Sprintf("CPU %.2f%% 超过阈值 %.2f%% 连续 %d 次", metric.CPUPct, target.CPUThreshold, exceedCnt),
+				}
+				m.addEvent(evt)
+				
+				// 如果配置了重启命令，执行重启
+				if target.RestartCmd != "" {
+					m.tryRestart(pid, "cpu_threshold")
+				}
+				
+				m.mu.Lock()
+				state.cpuExceedCnt = 0
+				m.mu.Unlock()
+			}
+		} else {
+			m.mu.Lock()
+			state.cpuExceedCnt = 0
+			m.mu.Unlock()
+		}
+		
+		// 检查内存阈值
+		if target.MemThreshold > 0 && metric.RSSBytes > target.MemThreshold {
+			m.mu.Lock()
+			state.memExceedCnt++
+			exceedCnt := state.memExceedCnt
+			exceedLimit := target.MemExceedCount
+			if exceedLimit <= 0 {
+				exceedLimit = 3 // 默认连续3次
+			}
+			m.mu.Unlock()
+			
+			if exceedCnt >= exceedLimit {
+				evt := types.Event{
+					Timestamp: time.Now(),
+					Type:      "mem_threshold",
+					PID:       pid,
+					Name:      target.Name,
+					Message:   fmt.Sprintf("内存 %d MB 超过阈值 %d MB 连续 %d 次", metric.RSSBytes/1024/1024, target.MemThreshold/1024/1024, exceedCnt),
+				}
+				m.addEvent(evt)
+				
+				if target.RestartCmd != "" {
+					m.tryRestart(pid, "mem_threshold")
+				}
+				
+				m.mu.Lock()
+				state.memExceedCnt = 0
+				m.mu.Unlock()
+			}
+		} else {
+			m.mu.Lock()
+			state.memExceedCnt = 0
+			m.mu.Unlock()
+		}
+	}
+
+	buf.Push(metric)
+	m.mu.Lock()
+	state.lastMetric = &metric
+	exitReported := state.exitReported
+	autoRestart := target.AutoRestart
+	restartCmd := target.RestartCmd
+	m.mu.Unlock()
+
+	// 写入日志
+	m.writeLog(metric)
+
+	// 检查规则：只在首次检测到退出时报告
+	if !alive && !exitReported {
+		m.mu.Lock()
+		state.exitReported = true
+		m.mu.Unlock()
+		
+		evt := types.Event{
+			Timestamp: time.Now(),
+			Type:      "exit",
+			PID:       pid,
+			Name:      target.Name,
+			Message:   "进程已退出",
+		}
+		m.addEvent(evt)
+		
+		// 自动重启
+		if autoRestart && restartCmd != "" {
+			m.tryRestart(pid, "exit")
+		}
+	}
+}
+
+// tryRestart 尝试重启进程
+func (m *MultiMonitor) tryRestart(pid int32, reason string) {
+	m.mu.Lock()
+	state, exists := m.targets[pid]
+	if !exists {
+		m.mu.Unlock()
+		return
+	}
+	
+	target := state.target
+	cooldown := target.RestartCooldown
+	if cooldown <= 0 {
+		cooldown = 30 // 默认30秒冷却
+	}
+	
+	// 检查冷却时间
+	if time.Since(state.lastRestart) < time.Duration(cooldown)*time.Second {
+		m.mu.Unlock()
+		log.Printf("[INFO] 重启冷却中，跳过重启 PID=%d", pid)
+		return
+	}
+	
+	state.lastRestart = time.Now()
+	state.restartCount++
+	restartCount := state.restartCount
+	restartCmd := target.RestartCmd
+	targetName := target.Name
+	m.mu.Unlock()
+	
+	// 执行重启命令
+	go func() {
+		var cmd *exec.Cmd
+		var cmdStr string
+		
+		if runtime.GOOS == "windows" {
+			// Windows: 使用 start 命令在新窗口中启动，避免阻塞
+			// 如果命令包含路径，用 start "" "path" 格式
+			cmdStr = fmt.Sprintf("start \"\" %s", restartCmd)
+			cmd = exec.Command("cmd", "/C", cmdStr)
+		} else {
+			cmdStr = restartCmd
+			cmd = exec.Command("sh", "-c", restartCmd)
+		}
+		
+		// 设置不继承当前进程的标准输入输出
+		cmd.Stdin = nil
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		
+		log.Printf("[INFO] 执行重启命令: %s", cmdStr)
+		
+		err := cmd.Start()
+		
+		evt := types.Event{
+			Timestamp: time.Now(),
+			Type:      "restart",
+			PID:       pid,
+			Name:      targetName,
+		}
+		
+		if err != nil {
+			evt.Message = fmt.Sprintf("重启失败 (原因:%s): %v | 命令: %s", reason, err, restartCmd)
+			log.Printf("[ERROR] 重启失败: %v", err)
+		} else {
+			evt.Message = fmt.Sprintf("已执行重启命令 (原因:%s, 第%d次重启) | 命令: %s", reason, restartCount, restartCmd)
+		}
+		
+		m.addEvent(evt)
+	}()
+}
+
+func (m *MultiMonitor) writeLog(v any) {
+	if m.logFile == nil {
+		return
+	}
+	data, _ := json.Marshal(v)
+	m.logFile.Write(append(data, '\n'))
+}
+
+func (m *MultiMonitor) addEvent(evt types.Event) {
+	m.eventsBuffer.Push(evt)
+	m.writeLog(evt)
+	log.Printf("[EVENT] %s: %s (pid=%d)", evt.Type, evt.Message, evt.PID)
+}
+
+// GetMetrics 获取指定进程的最近指标
+func (m *MultiMonitor) GetMetrics(pid int32, n int) []types.ProcessMetrics {
+	m.mu.RLock()
+	buf, exists := m.metricsBuffers[pid]
+	m.mu.RUnlock()
+	if !exists {
+		return nil
+	}
+	return buf.GetRecent(n)
+}
+
+// GetAllLatestMetrics 获取所有监控目标的最新指标
+func (m *MultiMonitor) GetAllLatestMetrics() map[int32]*types.ProcessMetrics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make(map[int32]*types.ProcessMetrics)
+	for pid, state := range m.targets {
+		if state.lastMetric != nil {
+			result[pid] = state.lastMetric
+		}
+	}
+	return result
+}
+
+// GetRecentEvents 获取最近事件
+func (m *MultiMonitor) GetRecentEvents(n int) []types.Event {
+	return m.eventsBuffer.GetRecent(n)
+}
+
+// IsRunning 检查是否运行中
+func (m *MultiMonitor) IsRunning() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.running
+}
+
+// ListAllProcesses 列出系统所有进程
+func (m *MultiMonitor) ListAllProcesses() ([]types.ProcessInfo, error) {
+	return m.provider.ListAllProcesses()
+}
+
+// GetSystemMetrics 获取系统指标
+func (m *MultiMonitor) GetSystemMetrics() (*types.SystemMetrics, error) {
+	return m.provider.GetSystemMetrics()
+}
