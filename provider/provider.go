@@ -12,10 +12,6 @@ type ProcProvider interface {
 	GetMetrics(pid int32) (*types.ProcessMetrics, error)
 	// IsAlive 检查进程是否存活
 	IsAlive(pid int32) bool
-	// KillProcess 杀死进程
-	KillProcess(pid int32) error
-	// ExecuteRestart 执行重启命令
-	ExecuteRestart(cmd string) error
 	// ListAllProcesses 列出系统所有进程
 	ListAllProcesses() ([]types.ProcessInfo, error)
 	// GetSystemMetrics 获取系统指标

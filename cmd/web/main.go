@@ -12,19 +12,17 @@ var version = "1.0.0"
 
 func main() {
 	var (
-		addr         = flag.String("addr", ":8080", "HTTP server address")
-		cpuThreshold = flag.Float64("cpu-threshold", 80.0, "CPU threshold percentage")
-		cpuExceed    = flag.Int("cpu-exceed-count", 5, "consecutive CPU exceed count")
-		logDir       = flag.String("log-dir", "", "log directory (default: ./logs)")
-		
+		addr   = flag.String("addr", ":8080", "HTTP server address")
+		logDir = flag.String("log-dir", "", "log directory (default: ./logs)")
+
 		// 服务管理命令
-		runService   = flag.Bool("service", false, "run as service")
-		install      = flag.Bool("install", false, "install as system service")
-		uninstall    = flag.Bool("uninstall", false, "uninstall system service")
-		start        = flag.Bool("start", false, "start the service")
-		stop         = flag.Bool("stop", false, "stop the service")
-		status       = flag.Bool("status", false, "show service status")
-		showVersion  = flag.Bool("version", false, "show version")
+		runService  = flag.Bool("service", false, "run as service")
+		install     = flag.Bool("install", false, "install as system service")
+		uninstall   = flag.Bool("uninstall", false, "uninstall system service")
+		start       = flag.Bool("start", false, "start the service")
+		stop        = flag.Bool("stop", false, "stop the service")
+		status      = flag.Bool("status", false, "show service status")
+		showVersion = flag.Bool("version", false, "show version")
 	)
 	flag.Parse()
 
@@ -76,10 +74,8 @@ func main() {
 
 	// 配置
 	cfg := service.Config{
-		Addr:           *addr,
-		CPUThreshold:   *cpuThreshold,
-		CPUExceedCount: *cpuExceed,
-		LogDir:         *logDir,
+		Addr:   *addr,
+		LogDir: *logDir,
 	}
 
 	// 运行服务

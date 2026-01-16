@@ -40,7 +40,6 @@ type commonProvider struct {
 
 	// 平台特定函数
 	matchProcessName func(procName, targetName string) bool
-	executeCommand   func(cmd string) error
 	formatCmdline    func(exe string) string
 	getHandleCount   func(pid int32) int32                           // 可选，Windows 专用
 	getMemoryPools   func(pid int32) (pagedPool, nonPagedPool uint64) // 可选，Windows 专用
@@ -49,7 +48,6 @@ type commonProvider struct {
 // newCommonProvider 创建通用 provider
 func newCommonProvider(
 	matchName func(procName, targetName string) bool,
-	execCmd func(cmd string) error,
 	fmtCmdline func(exe string) string,
 	getHandles func(pid int32) int32,
 	getMemPools func(pid int32) (uint64, uint64),
@@ -57,7 +55,6 @@ func newCommonProvider(
 	p := &commonProvider{
 		ioSamples:        make(map[int32]*ioSample),
 		matchProcessName: matchName,
-		executeCommand:   execCmd,
 		formatCmdline:    fmtCmdline,
 		getHandleCount:   getHandles,
 		getMemoryPools:   getMemPools,
@@ -144,18 +141,6 @@ func (p *commonProvider) IsAlive(pid int32) bool {
 	}
 	running, _ := proc.IsRunning()
 	return running
-}
-
-func (p *commonProvider) KillProcess(pid int32) error {
-	proc, err := process.NewProcess(pid)
-	if err != nil {
-		return err
-	}
-	return proc.Kill()
-}
-
-func (p *commonProvider) ExecuteRestart(cmd string) error {
-	return p.executeCommand(cmd)
 }
 
 // calcDiskIO 计算磁盘 IO 速率和次数

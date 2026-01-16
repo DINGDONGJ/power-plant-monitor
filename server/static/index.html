@@ -346,34 +346,8 @@
                 <h3>⚙ 监控配置 - <span id="configTargetName"></span></h3>
                 <input type="hidden" id="configPid">
                 <div class="modal-row">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="configAutoRestart">
-                        <span>退出时自动重启</span>
-                    </label>
-                </div>
-                <div class="modal-row">
-                    <label>重启命令</label>
-                    <input type="text" id="configRestartCmd" placeholder="例如: notepad.exe 或 start myapp.exe">
-                </div>
-                <div class="modal-row">
-                    <label>CPU 阈值 (%, 0=不监控)</label>
-                    <input type="number" id="configCpuThreshold" min="0" max="100" step="1" value="0">
-                </div>
-                <div class="modal-row">
-                    <label>内存阈值 (MB, 0=不监控)</label>
-                    <input type="number" id="configMemThreshold" min="0" step="1" value="0">
-                </div>
-                <div class="modal-row">
-                    <label>CPU超限触发次数 (连续N次超限后触发)</label>
-                    <input type="number" id="configCpuExceedCount" min="1" max="100" value="3">
-                </div>
-                <div class="modal-row">
-                    <label>内存超限触发次数 (连续N次超限后触发)</label>
-                    <input type="number" id="configMemExceedCount" min="1" max="100" value="3">
-                </div>
-                <div class="modal-row">
-                    <label>重启冷却时间 (秒)</label>
-                    <input type="number" id="configRestartCooldown" min="0" value="30">
+                    <label>备注名称</label>
+                    <input type="text" id="configAlias" placeholder="例如: 电力监控主进程">
                 </div>
                 <div class="modal-buttons">
                     <button class="btn" onclick="closeConfigModal()">取消</button>
@@ -1485,14 +1459,7 @@
             
             document.getElementById('configPid').value = pid;
             document.getElementById('configTargetName').textContent = t.name || 'PID:' + pid;
-            document.getElementById('configAutoRestart').checked = t.auto_restart || false;
-            // 如果没有设置重启命令，自动填充 cmdline
-            document.getElementById('configRestartCmd').value = t.restart_cmd || t.cmdline || '';
-            document.getElementById('configCpuThreshold').value = t.cpu_threshold || 0;
-            document.getElementById('configMemThreshold').value = t.mem_threshold ? Math.round(t.mem_threshold / 1024 / 1024) : 0;
-            document.getElementById('configCpuExceedCount').value = t.cpu_exceed_count || 3;
-            document.getElementById('configMemExceedCount').value = t.mem_exceed_count || 3;
-            document.getElementById('configRestartCooldown').value = t.restart_cooldown || 30;
+            document.getElementById('configAlias').value = t.alias || '';
             
             document.getElementById('configModal').classList.add('show');
         }
@@ -1509,13 +1476,8 @@
             const config = {
                 pid: pid,
                 name: t.name,
-                auto_restart: document.getElementById('configAutoRestart').checked,
-                restart_cmd: document.getElementById('configRestartCmd').value,
-                cpu_threshold: parseFloat(document.getElementById('configCpuThreshold').value) || 0,
-                mem_threshold: (parseInt(document.getElementById('configMemThreshold').value) || 0) * 1024 * 1024,
-                cpu_exceed_count: parseInt(document.getElementById('configCpuExceedCount').value) || 3,
-                mem_exceed_count: parseInt(document.getElementById('configMemExceedCount').value) || 3,
-                restart_cooldown: parseInt(document.getElementById('configRestartCooldown').value) || 30
+                alias: document.getElementById('configAlias').value,
+                cmdline: t.cmdline
             };
             
             try {
@@ -1579,7 +1541,7 @@
                 container.innerHTML = '<p style="color:#666;padding:20px">暂无事件</p>';
                 return;
             }
-            const typeMap = { exit: '退出', restart: '重启', cpu_threshold: 'CPU超限', mem_threshold: '内存超限' };
+            const typeMap = { exit: '退出' };
             container.innerHTML = events.slice().reverse().map(e => {
                 // 尝试从缓存获取别名
                 const target = targetConfigs[e.pid];

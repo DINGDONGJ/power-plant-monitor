@@ -17,11 +17,9 @@ import (
 
 // Config 服务配置
 type Config struct {
-	Addr           string
-	CPUThreshold   float64
-	CPUExceedCount int
-	LogDir         string
-	ConfigFile     string
+	Addr       string
+	LogDir     string
+	ConfigFile string
 }
 
 // Service 监控服务
@@ -50,8 +48,6 @@ func New(cfg Config) (*Service, error) {
 	}
 
 	monitorCfg := types.MultiMonitorConfig{
-		CPUThreshold:     cfg.CPUThreshold,
-		CPUExceedCount:   cfg.CPUExceedCount,
 		SampleInterval:   1,
 		MetricsBufferLen: 300,
 		EventsBufferLen:  100,
