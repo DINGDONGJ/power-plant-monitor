@@ -50,6 +50,7 @@ func NewWebServerWithAuth(mm *monitor.MultiMonitor, authCfg AuthConfig) *WebServ
 	s.mux.HandleFunc("/api/metrics", s.handleMetrics)
 	s.mux.HandleFunc("/api/metrics/latest", s.handleLatestMetrics)
 	s.mux.HandleFunc("/api/events", s.handleEvents)
+	s.mux.HandleFunc("/api/process-changes", s.handleProcessChanges)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/system", s.handleSystem)
 
@@ -221,6 +222,19 @@ func (s *WebServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		events = []types.Event{}
 	}
 	s.jsonResponse(w, events)
+}
+
+// GET /api/process-changes?n=50 - 获取最近进程变化
+func (s *WebServer) handleProcessChanges(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	if n <= 0 {
+		n = 50
+	}
+	changes := s.multiMonitor.GetProcessChanges(n)
+	if changes == nil {
+		changes = []types.ProcessChange{}
+	}
+	s.jsonResponse(w, changes)
 }
 
 // GET /api/status - 获取监控状态

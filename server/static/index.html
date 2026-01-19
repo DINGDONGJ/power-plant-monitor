@@ -185,6 +185,8 @@
         .event-item .type-exit { color: #ff4444; }
         .event-item .type-restart { color: #ffaa00; }
         .event-item .type-cpu_threshold { color: #ff00ff; }
+        .event-item .type-new_process { color: #00ff00; }
+        .event-item .type-process_gone { color: #ff8800; }
         
         .stats { color: #888; font-size: 12px; }
         .drag-handle { cursor: grab; color: #666; margin-right: 5px; }
@@ -387,6 +389,7 @@
             'username': 100,
             'cpu': 70,
             'mem': 80,
+            'memGrowth': 85,
             'vms': 80,
             'pagedPool': 75,
             'nonPagedPool': 75,
@@ -407,6 +410,7 @@
             { key: 'username', title: '发布者', sortable: true },
             { key: 'cpu', title: 'CPU%', sortable: true },
             { key: 'mem', title: '内存', sortable: true },
+            { key: 'memGrowth', title: '内存增速', sortable: true },
             { key: 'vms', title: '虚拟内存', sortable: true },
             { key: 'pagedPool', title: '页面池', sortable: true },
             { key: 'nonPagedPool', title: '非页面池', sortable: true },
@@ -721,13 +725,14 @@
                 const currentMaxNet = Math.max(...netRecvHistory, ...netSendHistory, 1024);
                 maxNetRate = Math.max(maxNetRate * 0.99, currentMaxNet * 1.2); // 缓慢衰减，快速增长
                 
-                // 更新当前值显示
+                // 更新当前值显示（包含 CPU 详细分解）
+                const cpuDetail = `${data.cpu_percent.toFixed(1)}% (U:${(data.cpu_user||0).toFixed(0)}% S:${(data.cpu_system||0).toFixed(0)}% IO:${(data.cpu_iowait||0).toFixed(0)}%)`;
                 document.getElementById('cpuValue').textContent = data.cpu_percent.toFixed(2) + '%';
                 document.getElementById('memValue').textContent = data.memory_percent.toFixed(2) + '%';
                 document.getElementById('netValue').textContent = '↓' + formatNetRate(data.net_recv_rate || 0) + ' ↑' + formatNetRate(data.net_send_rate || 0);
-                document.getElementById('cpuInfo').textContent = '当前: ' + data.cpu_percent.toFixed(2) + '%';
-                document.getElementById('memInfo').textContent = formatBytes(data.memory_used) + ' / ' + formatBytes(data.memory_total);
-                document.getElementById('netInfo').textContent = '↓' + formatBytes(data.net_bytes_recv || 0) + ' ↑' + formatBytes(data.net_bytes_sent || 0);
+                document.getElementById('cpuInfo').textContent = cpuDetail;
+                document.getElementById('memInfo').textContent = formatBytes(data.memory_used) + ' / ' + formatBytes(data.memory_total) + ' (可用:' + formatBytes(data.memory_available || 0) + ')';
+                document.getElementById('netInfo').textContent = '磁盘IO: R:' + formatNetRate(data.disk_read_rate || 0) + ' W:' + formatNetRate(data.disk_write_rate || 0);
                 lastMemInfo = { used: data.memory_used, total: data.memory_total };
                 
                 // 图表由动画循环绘制，这里只更新数据
@@ -1043,6 +1048,22 @@
             return (bytesPerSec / 1024 / 1024).toFixed(1) + ' MB/s';
         }
         
+        // 格式化内存增长速率（可正可负）
+        function formatMemGrowth(bytesPerSec) {
+            const abs = Math.abs(bytesPerSec);
+            let text;
+            if (abs < 1024) text = abs.toFixed(0) + ' B/s';
+            else if (abs < 1024 * 1024) text = (abs / 1024).toFixed(1) + ' KB/s';
+            else text = (abs / 1024 / 1024).toFixed(1) + ' MB/s';
+            
+            if (bytesPerSec > 1024) {
+                return `<span style="color:#ff4444">+${text}</span>`; // 增长用红色
+            } else if (bytesPerSec < -1024) {
+                return `<span style="color:#00ff00">-${text}</span>`; // 释放用绿色
+            }
+            return `<span style="color:#888">${text}</span>`; // 稳定用灰色
+        }
+        
         // 根据磁盘速率获取颜色
         function getDiskColor(bytesPerSec) {
             // 0 B/s = 绿色, 1MB/s = 黄色, 10MB/s = 橙色, 50MB/s+ = 红色
@@ -1075,6 +1096,7 @@
                     case 'username': return '<span style="color:#888">-</span>';
                     case 'cpu': return group.totalCpu.toFixed(2);
                     case 'mem': return formatBytes(group.totalMem);
+                    case 'memGrowth': return formatMemGrowth(group.totalMemGrowth || 0);
                     case 'vms': return formatBytes(group.totalVms);
                     case 'fds': return `<span style="color:#888">${group.totalFds}</span>`;
                     case 'pagedPool': return formatBytes(group.totalPagedPool);
@@ -1098,6 +1120,7 @@
                     case 'username': return `<span style="color:#ccc">${p.username || '-'}</span>`;
                     case 'cpu': return p.cpu_pct.toFixed(2);
                     case 'mem': return formatBytes(p.rss_bytes);
+                    case 'memGrowth': return formatMemGrowth(p.rss_growth_rate || 0);
                     case 'vms': return formatBytes(p.vms || 0);
                     case 'fds': return `<span style="color:#ccc">${p.num_fds || 0}</span>`;
                     case 'pagedPool': return formatBytes(p.paged_pool || 0);
@@ -1128,6 +1151,7 @@
             const groupList = Object.entries(groups).map(([name, procs]) => {
                 const totalCpu = procs.reduce((sum, p) => sum + p.cpu_pct, 0);
                 const totalMem = procs.reduce((sum, p) => sum + p.rss_bytes, 0);
+                const totalMemGrowth = procs.reduce((sum, p) => sum + (p.rss_growth_rate || 0), 0);
                 const totalVms = procs.reduce((sum, p) => sum + (p.vms || 0), 0);
                 const totalFds = procs.reduce((sum, p) => sum + (p.num_fds || 0), 0);
                 const totalPagedPool = procs.reduce((sum, p) => sum + (p.paged_pool || 0), 0);
@@ -1137,7 +1161,7 @@
                 const totalNetRecv = procs.reduce((sum, p) => sum + (p.net_recv_rate || 0), 0);
                 const totalNetSend = procs.reduce((sum, p) => sum + (p.net_send_rate || 0), 0);
                 const hasMonitored = procs.some(p => monitoredPids.has(p.pid));
-                return { name, procs, totalCpu, totalMem, totalVms, totalFds, totalPagedPool, totalNonPagedPool, totalDiskRead, totalDiskWrite, totalNetRecv, totalNetSend, hasMonitored };
+                return { name, procs, totalCpu, totalMem, totalMemGrowth, totalVms, totalFds, totalPagedPool, totalNonPagedPool, totalDiskRead, totalDiskWrite, totalNetRecv, totalNetSend, hasMonitored };
             });
             
             // 排序
@@ -1541,7 +1565,7 @@
                 container.innerHTML = '<p style="color:#666;padding:20px">暂无事件</p>';
                 return;
             }
-            const typeMap = { exit: '退出' };
+            const typeMap = { exit: '退出', new_process: '新进程', process_gone: '进程消失' };
             container.innerHTML = events.slice().reverse().map(e => {
                 // 尝试从缓存获取别名
                 const target = targetConfigs[e.pid];

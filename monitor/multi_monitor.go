@@ -25,6 +25,9 @@ type MultiMonitor struct {
 	running        bool
 	stopCh         chan struct{}
 	logFile        *os.File
+
+	// 进程变化追踪
+	processTracker *ProcessTracker
 }
 
 type targetState struct {
@@ -63,6 +66,7 @@ func NewMultiMonitor(cfg types.MultiMonitorConfig, prov provider.ProcProvider) (
 		config:         cfg,
 		stopCh:         make(chan struct{}),
 		logFile:        logFile,
+		processTracker: NewProcessTracker(200), // 保留最近 200 条进程变化
 	}
 
 	return m, nil
@@ -330,7 +334,38 @@ func (m *MultiMonitor) IsRunning() bool {
 
 // ListAllProcesses 列出系统所有进程
 func (m *MultiMonitor) ListAllProcesses() ([]types.ProcessInfo, error) {
-	return m.provider.ListAllProcesses()
+	processes, err := m.provider.ListAllProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新进程追踪器
+	changes := m.processTracker.Update(processes)
+
+	// 将进程变化转换为事件
+	for _, change := range changes {
+		eventType := "new_process"
+		message := "新进程启动"
+		if change.Type == "gone" {
+			eventType = "process_gone"
+			message = "进程消失"
+		}
+		evt := types.Event{
+			Timestamp: change.Timestamp,
+			Type:      eventType,
+			PID:       change.PID,
+			Name:      change.Name,
+			Message:   message,
+		}
+		m.addEvent(evt)
+	}
+
+	return processes, nil
+}
+
+// GetProcessChanges 获取最近的进程变化
+func (m *MultiMonitor) GetProcessChanges(n int) []types.ProcessChange {
+	return m.processTracker.GetRecentChanges(n)
 }
 
 // GetSystemMetrics 获取系统指标

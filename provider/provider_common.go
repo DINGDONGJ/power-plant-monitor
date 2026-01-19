@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 	"monitor-agent/netmon"
 	"monitor-agent/types"
 )
 
-// 磁盘 IO 采样状态（增强版）
+// 磁盘 IO 采样状态
 type ioSample struct {
 	readBytes  uint64
 	writeBytes uint64
@@ -26,23 +27,61 @@ type ioSample struct {
 	lastWriteOps  float64
 }
 
+// RSS 采样状态（用于计算增长速率）
+type rssSample struct {
+	rss        uint64
+	sampleTime time.Time
+	growthRate float64
+}
+
+// 系统级采样状态
+type systemSample struct {
+	// CPU 详细指标
+	cpuUser   float64
+	cpuSystem float64
+	cpuIowait float64
+	cpuIdle   float64
+	cpuTotal  float64
+
+	// Swap 采样
+	swapIn     uint64
+	swapOut    uint64
+	swapInRate  float64
+	swapOutRate float64
+
+	// 磁盘 IO 采样
+	diskReadBytes  uint64
+	diskWriteBytes uint64
+	diskReadCount  uint64
+	diskWriteCount uint64
+	diskReadRate   float64
+	diskWriteRate  float64
+	diskReadOps    float64
+	diskWriteOps   float64
+
+	sampleTime time.Time
+}
+
 // commonProvider 通用 provider 实现
 type commonProvider struct {
-	ioSamplesMu sync.RWMutex
-	ioSamples   map[int32]*ioSample
+	// 进程级采样
+	ioSamplesMu  sync.RWMutex
+	ioSamples    map[int32]*ioSample
+	rssSamplesMu sync.RWMutex
+	rssSamples   map[int32]*rssSample
 
-	// 系统指标缓存（后台 goroutine 更新）
-	sysCPUMu      sync.RWMutex
-	sysCPUPercent float64
+	// 系统级采样缓存
+	sysSampleMu sync.RWMutex
+	sysSample   *systemSample
 
-	// 进程网络监控（统一使用 gopacket）
+	// 进程网络监控
 	netMonitor *netmon.NetMonitor
 
 	// 平台特定函数
 	matchProcessName func(procName, targetName string) bool
 	formatCmdline    func(exe string) string
-	getHandleCount   func(pid int32) int32                           // 可选，Windows 专用
-	getMemoryPools   func(pid int32) (pagedPool, nonPagedPool uint64) // 可选，Windows 专用
+	getHandleCount   func(pid int32) int32
+	getMemoryPools   func(pid int32) (pagedPool, nonPagedPool uint64)
 }
 
 // newCommonProvider 创建通用 provider
@@ -54,6 +93,8 @@ func newCommonProvider(
 ) *commonProvider {
 	p := &commonProvider{
 		ioSamples:        make(map[int32]*ioSample),
+		rssSamples:       make(map[int32]*rssSample),
+		sysSample:        &systemSample{sampleTime: time.Now()},
 		matchProcessName: matchName,
 		formatCmdline:    fmtCmdline,
 		getHandleCount:   getHandles,
@@ -70,17 +111,83 @@ func newCommonProvider(
 	return p
 }
 
-// sampleSystemMetrics 后台定时采集系统 CPU
+// sampleSystemMetrics 后台定时采集系统指标
 func (p *commonProvider) sampleSystemMetrics() {
-	for {
-		// CPU 采样
-		cpuPercent, _ := cpu.Percent(time.Second, false)
-		if len(cpuPercent) > 0 {
-			p.sysCPUMu.Lock()
-			p.sysCPUPercent = cpuPercent[0]
-			p.sysCPUMu.Unlock()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		p.collectSystemSample()
+	}
+}
+
+// collectSystemSample 采集一次系统指标
+func (p *commonProvider) collectSystemSample() {
+	now := time.Now()
+
+	// CPU 详细指标
+	cpuTimes, _ := cpu.Times(false) // false = 合并所有 CPU
+	var cpuUser, cpuSystem, cpuIowait, cpuIdle, cpuTotal float64
+	if len(cpuTimes) > 0 {
+		t := cpuTimes[0]
+		total := t.User + t.System + t.Idle + t.Nice + t.Iowait + t.Irq + t.Softirq + t.Steal
+		if total > 0 {
+			cpuUser = t.User / total * 100
+			cpuSystem = t.System / total * 100
+			cpuIowait = t.Iowait / total * 100
+			cpuIdle = t.Idle / total * 100
+			cpuTotal = 100 - cpuIdle
 		}
 	}
+
+	// Swap 指标
+	swapInfo, _ := mem.SwapMemory()
+	var swapIn, swapOut uint64
+	if swapInfo != nil {
+		swapIn = swapInfo.Sin
+		swapOut = swapInfo.Sout
+	}
+
+	// 系统磁盘 IO
+	diskStats, _ := disk.IOCounters()
+	var diskReadBytes, diskWriteBytes, diskReadCount, diskWriteCount uint64
+	for _, stat := range diskStats {
+		diskReadBytes += stat.ReadBytes
+		diskWriteBytes += stat.WriteBytes
+		diskReadCount += stat.ReadCount
+		diskWriteCount += stat.WriteCount
+	}
+
+	// 计算速率
+	p.sysSampleMu.Lock()
+	defer p.sysSampleMu.Unlock()
+
+	deltaTime := now.Sub(p.sysSample.sampleTime).Seconds()
+	if deltaTime > 0.1 {
+		// Swap 速率
+		p.sysSample.swapInRate = float64(swapIn-p.sysSample.swapIn) / deltaTime
+		p.sysSample.swapOutRate = float64(swapOut-p.sysSample.swapOut) / deltaTime
+
+		// 磁盘 IO 速率
+		p.sysSample.diskReadRate = float64(diskReadBytes-p.sysSample.diskReadBytes) / deltaTime
+		p.sysSample.diskWriteRate = float64(diskWriteBytes-p.sysSample.diskWriteBytes) / deltaTime
+		p.sysSample.diskReadOps = float64(diskReadCount-p.sysSample.diskReadCount) / deltaTime
+		p.sysSample.diskWriteOps = float64(diskWriteCount-p.sysSample.diskWriteCount) / deltaTime
+	}
+
+	// 更新采样值
+	p.sysSample.cpuUser = cpuUser
+	p.sysSample.cpuSystem = cpuSystem
+	p.sysSample.cpuIowait = cpuIowait
+	p.sysSample.cpuIdle = cpuIdle
+	p.sysSample.cpuTotal = cpuTotal
+	p.sysSample.swapIn = swapIn
+	p.sysSample.swapOut = swapOut
+	p.sysSample.diskReadBytes = diskReadBytes
+	p.sysSample.diskWriteBytes = diskWriteBytes
+	p.sysSample.diskReadCount = diskReadCount
+	p.sysSample.diskWriteCount = diskWriteCount
+	p.sysSample.sampleTime = now
 }
 
 func (p *commonProvider) FindAllPIDsByName(name string) ([]int32, error) {
@@ -143,7 +250,7 @@ func (p *commonProvider) IsAlive(pid int32) bool {
 	return running
 }
 
-// calcDiskIO 计算磁盘 IO 速率和次数
+// calcDiskIO 计算进程磁盘 IO 速率
 func (p *commonProvider) calcDiskIO(pid int32, readBytes, writeBytes, readCount, writeCount uint64) (readRate, writeRate, readOps, writeOps float64) {
 	now := time.Now()
 
@@ -185,6 +292,37 @@ func (p *commonProvider) calcDiskIO(pid int32, readBytes, writeBytes, readCount,
 	return readRate, writeRate, readOps, writeOps
 }
 
+// calcRSSGrowth 计算 RSS 增长速率
+func (p *commonProvider) calcRSSGrowth(pid int32, rss uint64) float64 {
+	now := time.Now()
+
+	p.rssSamplesMu.Lock()
+	defer p.rssSamplesMu.Unlock()
+
+	sample, exists := p.rssSamples[pid]
+	if !exists {
+		p.rssSamples[pid] = &rssSample{
+			rss:        rss,
+			sampleTime: now,
+		}
+		return 0
+	}
+
+	deltaTime := now.Sub(sample.sampleTime).Seconds()
+	if deltaTime < 0.5 {
+		return sample.growthRate
+	}
+
+	// 计算增长速率（可能为负数表示内存释放）
+	growthRate := float64(int64(rss)-int64(sample.rss)) / deltaTime
+
+	sample.rss = rss
+	sample.sampleTime = now
+	sample.growthRate = growthRate
+
+	return growthRate
+}
+
 func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 	procs, err := process.Processes()
 	if err != nil {
@@ -205,14 +343,12 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		cmdline, _ := proc.Cmdline()
 		ioCounters, _ := proc.IOCounters()
 		createTime, _ := proc.CreateTime()
-		
+
 		// 获取句柄数/文件描述符数
 		var numFDs int32
 		if p.getHandleCount != nil {
-			// Windows: 使用平台特定的 GetProcessHandleCount
 			numFDs = p.getHandleCount(proc.Pid)
 		} else {
-			// Linux: 使用 gopsutil 的 NumFDs
 			numFDs, _ = proc.NumFDs()
 		}
 
@@ -236,26 +372,19 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		// 获取内存池信息
 		var pagedPool, nonPagedPool uint64
 		if p.getMemoryPools != nil {
-			// Windows: 使用平台特定的 GetProcessMemoryInfo
 			pagedPool, nonPagedPool = p.getMemoryPools(proc.Pid)
 		} else if memInfo != nil {
-			// Linux: 近似处理
-			// 非页面池：使用 Data 段（数据段，常驻内存）
-			// 如果 Data 为 0，使用 RSS - Shared 作为近似
 			nonPagedPool = memInfo.Data
 			if nonPagedPool == 0 {
-				// 使用 RSS 的一部分作为近似
-				nonPagedPool = memInfo.RSS / 10 // 约 10% 作为非页面池近似
+				nonPagedPool = memInfo.RSS / 10
 			}
-			// 页面池：使用 Swap（交换空间）
-			// 如果 Swap 为 0，使用 VMS - RSS 作为近似（虚拟内存中未驻留的部分）
 			pagedPool = memInfo.Swap
 			if pagedPool == 0 && memInfo.VMS > memInfo.RSS {
-				pagedPool = (memInfo.VMS - memInfo.RSS) / 10 // 约 10% 作为页面池近似
+				pagedPool = (memInfo.VMS - memInfo.RSS) / 10
 			}
 		}
 
-		// 计算磁盘 IO 速率和次数
+		// 计算磁盘 IO 速率
 		var diskIO, diskReadRate, diskWriteRate, diskReadOps, diskWriteOps float64
 		if ioCounters != nil {
 			diskReadRate, diskWriteRate, diskReadOps, diskWriteOps = p.calcDiskIO(
@@ -263,8 +392,11 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 				ioCounters.ReadBytes, ioCounters.WriteBytes,
 				ioCounters.ReadCount, ioCounters.WriteCount,
 			)
-			diskIO = diskReadRate + diskWriteRate // 兼容旧字段
+			diskIO = diskReadRate + diskWriteRate
 		}
+
+		// 计算 RSS 增长速率
+		rssGrowthRate := p.calcRSSGrowth(proc.Pid, rss)
 
 		// 计算已运行时间（秒）
 		var uptime int64
@@ -285,6 +417,7 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			Name:          name,
 			CPUPct:        cpuPct,
 			RSSBytes:      rss,
+			RSSGrowthRate: rssGrowthRate,
 			VMS:           vms,
 			PagedPool:     pagedPool,
 			NonPagedPool:  nonPagedPool,
@@ -312,17 +445,38 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 	}
 	p.ioSamplesMu.Unlock()
 
+	p.rssSamplesMu.Lock()
+	for pid := range p.rssSamples {
+		if !alivePids[pid] {
+			delete(p.rssSamples, pid)
+		}
+	}
+	p.rssSamplesMu.Unlock()
+
 	return result, nil
 }
 
 func (p *commonProvider) GetSystemMetrics() (*types.SystemMetrics, error) {
+	// 内存指标
 	memInfo, _ := mem.VirtualMemory()
+	swapInfo, _ := mem.SwapMemory()
 
-	p.sysCPUMu.RLock()
-	cpuPct := p.sysCPUPercent
-	p.sysCPUMu.RUnlock()
+	// 获取缓存的系统采样
+	p.sysSampleMu.RLock()
+	cpuTotal := p.sysSample.cpuTotal
+	cpuUser := p.sysSample.cpuUser
+	cpuSystem := p.sysSample.cpuSystem
+	cpuIowait := p.sysSample.cpuIowait
+	cpuIdle := p.sysSample.cpuIdle
+	swapInRate := p.sysSample.swapInRate
+	swapOutRate := p.sysSample.swapOutRate
+	diskReadRate := p.sysSample.diskReadRate
+	diskWriteRate := p.sysSample.diskWriteRate
+	diskReadOps := p.sysSample.diskReadOps
+	diskWriteOps := p.sysSample.diskWriteOps
+	p.sysSampleMu.RUnlock()
 
-	// 从 netmon 获取网络流量（统一使用 gopacket 抓包数据）
+	// 网络流量
 	var netRecv, netSent uint64
 	var netRecvRate, netSendRate float64
 	if p.netMonitor != nil {
@@ -333,14 +487,46 @@ func (p *commonProvider) GetSystemMetrics() (*types.SystemMetrics, error) {
 		netSendRate = sysStats.SendRate
 	}
 
+	// Swap 指标
+	var swapTotal, swapUsed uint64
+	var swapPercent float64
+	if swapInfo != nil {
+		swapTotal = swapInfo.Total
+		swapUsed = swapInfo.Used
+		swapPercent = swapInfo.UsedPercent
+	}
+
 	return &types.SystemMetrics{
-		CPUPercent:    cpuPct,
-		MemoryTotal:   memInfo.Total,
-		MemoryUsed:    memInfo.Used,
-		MemoryPercent: float64(memInfo.Used) / float64(memInfo.Total) * 100,
-		NetBytesRecv:  netRecv,
-		NetBytesSent:  netSent,
-		NetRecvRate:   netRecvRate,
-		NetSendRate:   netSendRate,
+		// CPU
+		CPUPercent: cpuTotal,
+		CPUUser:    cpuUser,
+		CPUSystem:  cpuSystem,
+		CPUIowait:  cpuIowait,
+		CPUIdle:    cpuIdle,
+
+		// 内存
+		MemoryTotal:     memInfo.Total,
+		MemoryUsed:      memInfo.Used,
+		MemoryAvailable: memInfo.Available,
+		MemoryPercent:   memInfo.UsedPercent,
+
+		// Swap
+		SwapTotal:   swapTotal,
+		SwapUsed:    swapUsed,
+		SwapPercent: swapPercent,
+		SwapInRate:  swapInRate,
+		SwapOutRate: swapOutRate,
+
+		// 网络
+		NetBytesRecv: netRecv,
+		NetBytesSent: netSent,
+		NetRecvRate:  netRecvRate,
+		NetSendRate:  netSendRate,
+
+		// 磁盘 IO
+		DiskReadRate:  diskReadRate,
+		DiskWriteRate: diskWriteRate,
+		DiskReadOps:   diskReadOps,
+		DiskWriteOps:  diskWriteOps,
 	}, nil
 }
