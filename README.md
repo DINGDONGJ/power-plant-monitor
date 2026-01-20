@@ -10,7 +10,145 @@
 - 检测进程启动/退出等状态变化
 - 提供直观的 Web 界面进行管理和查看
 
+## 快速开始
+
+### 环境要求
+- Go 1.19 或更高版本
+- Windows 7+ 或 Linux（支持 systemd）
+- 管理员/root 权限（用于网络包捕获）
+
+### 编译依赖
+
+进程网络流量监控使用 gopacket 抓包，需要安装 pcap 库：
+
+**Linux**：
+```bash
+sudo apt install libpcap-dev
+```
+
+**Windows**：
+- 下载安装 [Npcap](https://npcap.com/)
+- 安装时勾选 "Install Npcap in WinPcap API-compatible Mode"
+
+### 编译
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd monitor-agent
+
+# 编译 Windows 版本（自动请求管理员权限）
+go build -o monitor-web.exe ./cmd/web
+
+# 编译 Linux 版本
+GOOS=linux go build -o monitor-web ./cmd/web
+```
+
+### 配置
+
+生成配置文件：
+```bash
+.\monitor-web.exe -gen-config
+```
+
+编辑 `config.json`，添加需要监控的进程：
+```json
+{
+  "server": {
+    "addr": ":8080",
+    "enabled": true
+  },
+  "targets": [
+    {
+      "pid": 0,
+      "name": "your-process.exe",
+      "alias": "核心进程"
+    }
+  ],
+  "sampling": {
+    "interval": 1,
+    "metrics_buffer_len": 300,
+    "events_buffer_len": 100
+  }
+}
+```
+
+### 运行
+
+#### 方式一：Web UI 模式（推荐）
+```bash
+.\monitor-web.exe -config config.json
+```
+访问 http://localhost:8080 查看监控界面
+
+#### 方式二：CLI + Web 同时运行（数据共享）
+```bash
+.\monitor-web.exe -cli -config config.json
+```
+- CLI 在前台运行，可交互操作
+- Web 服务器在后台运行（如果 config.json 中 `server.enabled = true`）
+- **CLI 和 Web 共享同一个监控实例，数据完全同步**
+- 在 CLI 中添加的监控目标，Web 界面立即可见
+- 在 Web 中添加的监控目标，CLI 中 `list` 命令立即可见
+
+#### 方式三：纯 CLI 模式（无 Web）
+```bash
+.\monitor-web.exe -cli-only -config config.json
+```
+或在 `config.json` 中设置 `server.enabled = false`，然后：
+```bash
+.\monitor-web.exe -cli -config config.json
+```
+
+#### 方式四：后台监控（无交互）
+在 `config.json` 中设置 `server.enabled = false`，然后运行：
+```bash
+.\monitor-web.exe -config config.json
+```
+
+### CLI 命令
+
+在 CLI 交互模式下，可使用以下命令：
+
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `add <pid\|name> [alias]` | 添加监控目标 | `add 1234 核心进程` 或 `add nginx.exe Web服务` |
+| `remove <pid>` | 移除监控目标 | `remove 1234` |
+| `list` | 列出所有监控目标（显示完整指标）| `list` |
+| `status` | 显示系统状态（CPU、内存、网络、磁盘）| `status` |
+| `top [n]` | 显示 Top N 进程（按 CPU 排序）| `top 10` |
+| `events [n]` | 显示最近 N 条事件 | `events 20` |
+| `changes [n]` | 显示最近 N 条进程变化 | `changes 20` |
+| `watch <pid>` | 实时监控指定进程 | `watch 1234` |
+| `help` | 显示帮助信息 | `help` |
+| `exit` | 退出程序 | `exit` |
+
+## 命令行参数
+
+| 参数 | 说明 |
+|------|------|
+| `-config <file>` | 指定配置文件路径（默认：config.json）|
+| `-cli` | CLI 交互模式（Web 服务器根据配置决定是否启动）|
+| `-cli-only` | 纯 CLI 模式（强制禁用 Web 服务器）|
+| `-gen-config` | 生成示例配置文件 |
+| `-addr <addr>` | 覆盖配置中的服务器地址（如 `:8080`）|
+| `-log-dir <dir>` | 覆盖配置中的日志目录 |
+| `-service` | 以服务模式运行 |
+| `-install` | 安装系统服务 |
+| `-uninstall` | 卸载系统服务 |
+| `-start` | 启动服务 |
+| `-stop` | 停止服务 |
+| `-status` | 查看服务状态 |
+| `-version` | 显示版本信息 |
+
 ## 功能特性
+
+### 核心功能
+- **配置文件驱动**: 支持 JSON 配置文件，可自动加载监控目标
+- **CLI 交互模式**: 完整的命令行交互界面，支持实时查看和管理
+- **CLI 和 Web 数据共享**: 在 CLI 模式下，Web 服务器可在后台运行，两者共享同一个监控实例，数据完全同步
+- **后台监控**: 可在禁用 Web UI 的情况下运行，适合服务器环境
+- **增强日志**: JSONL 格式日志，可配置输出位置（控制台/文件）
 
 ### 进程监控
 - 实时采集系统所有进程的 CPU、内存、磁盘 IO、网络流量等指标
@@ -19,7 +157,7 @@
 - 可自定义显示列，支持拖拽调整列顺序和宽度
 - 自动检测新进程启动和进程消失
 
-### Web 界面
+### Web 界面（可选）
 - 终端风格的黑绿配色，专业感强
 - 系统资源实时曲线图（CPU/内存/网络），60秒历史数据
 - 监控列表和进程列表双表格布局
@@ -191,52 +329,6 @@ sudo apt install libpcap-dev
 ### 数据格式
 - **JSON**：API 请求响应格式
 - **JSONL**：日志文件格式（每行一个 JSON 对象，便于流式处理）
-
-## 快速开始
-
-### 环境要求
-- Go 1.19 或更高版本
-- Windows 7+ 或 Linux（支持 systemd）
-
-### 编译
-
-```bash
-# 克隆项目
-git clone <repository-url>
-cd monitor-agent
-
-# 编译 Windows 版本（自动请求管理员权限）
-go build -o monitor-web.exe ./cmd/web
-
-# 编译 Linux 版本
-GOOS=linux go build -o monitor-web ./cmd/web
-```
-
-### 运行
-
-```bash
-# Windows（双击或命令行运行，会自动请求管理员权限）
-.\monitor-web.exe
-
-# Linux（需要 root 权限以支持网络抓包）
-sudo ./monitor-web
-```
-
-启动后访问 http://localhost:8080
-
-### 命令行参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `-addr` | HTTP 服务监听地址 | `:8080` |
-| `-log-dir` | 日志文件目录 | `./logs` |
-| `-service` | 以服务模式运行 | `false` |
-| `-install` | 安装为系统服务 | - |
-| `-uninstall` | 卸载系统服务 | - |
-| `-start` | 启动服务 | - |
-| `-stop` | 停止服务 | - |
-| `-status` | 查看服务状态 | - |
-| `-version` | 显示版本号 | - |
 
 ## 服务部署
 

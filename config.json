@@ -1,0 +1,30 @@
+{
+  "server": {
+    "addr": ":8080",
+    "enabled": true
+  },
+  "logging": {
+    "dir": "./logs",
+    "level": "info",
+    "console_output": true,
+    "file_output": true,
+    "events_to_console": true
+  },
+  "targets": [
+    {
+      "pid": 0,
+      "name": "conhost.exe",
+      "alias": "控制台主机"
+    },
+    {
+      "pid": 0,
+      "name": "explorer.exe",
+      "alias": "Windows资源管理器"
+    }
+  ],
+  "sampling": {
+    "interval": 1,
+    "metrics_buffer_len": 300,
+    "events_buffer_len": 100
+  }
+}
