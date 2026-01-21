@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"monitor-agent/buffer"
+	"monitor-agent/impact"
 	"monitor-agent/provider"
 	"monitor-agent/types"
 )
@@ -28,6 +29,9 @@ type MultiMonitor struct {
 
 	// 进程变化追踪
 	processTracker *ProcessTracker
+
+	// 影响分析器
+	impactAnalyzer *impact.ImpactAnalyzer
 }
 
 type targetState struct {
@@ -72,6 +76,20 @@ func NewMultiMonitor(cfg types.MultiMonitorConfig, prov provider.ProcProvider) (
 	return m, nil
 }
 
+// SetImpactAnalyzer 设置影响分析器
+func (m *MultiMonitor) SetImpactAnalyzer(analyzer *impact.ImpactAnalyzer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.impactAnalyzer = analyzer
+}
+
+// GetImpactAnalyzer 获取影响分析器
+func (m *MultiMonitor) GetImpactAnalyzer() *impact.ImpactAnalyzer {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.impactAnalyzer
+}
+
 // AddTarget 添加监控目标
 func (m *MultiMonitor) AddTarget(target types.MonitorTarget) error {
 	m.mu.Lock()
@@ -113,6 +131,12 @@ func (m *MultiMonitor) RemoveTarget(pid int32) {
 	defer m.mu.Unlock()
 	delete(m.targets, pid)
 	delete(m.metricsBuffers, pid)
+
+	// 清理该目标的影响事件
+	if m.impactAnalyzer != nil {
+		m.impactAnalyzer.RemoveTargetEvents(pid)
+	}
+
 	log.Printf("[INFO] Removed monitor target: PID=%d", pid)
 }
 
@@ -122,6 +146,12 @@ func (m *MultiMonitor) RemoveAllTargets() {
 	defer m.mu.Unlock()
 	m.targets = make(map[int32]*targetState)
 	m.metricsBuffers = make(map[int32]*buffer.RingBuffer[types.ProcessMetrics])
+
+	// 清理所有影响事件
+	if m.impactAnalyzer != nil {
+		m.impactAnalyzer.ClearAllEvents()
+	}
+
 	log.Printf("[INFO] Removed all monitor targets")
 }
 
@@ -180,10 +210,20 @@ func (m *MultiMonitor) Start() {
 
 	go m.loop()
 	log.Printf("[INFO] MultiMonitor started")
+
+	// 启动影响分析器
+	if m.impactAnalyzer != nil {
+		m.impactAnalyzer.Start()
+	}
 }
 
 // Stop 停止监控
 func (m *MultiMonitor) Stop() {
+	// 停止影响分析器
+	if m.impactAnalyzer != nil {
+		m.impactAnalyzer.Stop()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.running {
@@ -296,6 +336,18 @@ func (m *MultiMonitor) addEvent(evt types.Event) {
 	log.Printf("[EVENT] %s: %s (pid=%d)", evt.Type, evt.Message, evt.PID)
 }
 
+// AddImpactEvent 添加影响事件到事件日志
+func (m *MultiMonitor) AddImpactEvent(eventType string, pid int32, name string, message string) {
+	evt := types.Event{
+		Timestamp: time.Now(),
+		Type:      eventType,
+		PID:       pid,
+		Name:      name,
+		Message:   message,
+	}
+	m.addEvent(evt)
+}
+
 // GetMetrics 获取指定进程的最近指标
 func (m *MultiMonitor) GetMetrics(pid int32, n int) []types.ProcessMetrics {
 	m.mu.RLock()
@@ -371,4 +423,20 @@ func (m *MultiMonitor) GetProcessChanges(n int) []types.ProcessChange {
 // GetSystemMetrics 获取系统指标
 func (m *MultiMonitor) GetSystemMetrics() (*types.SystemMetrics, error) {
 	return m.provider.GetSystemMetrics()
+}
+
+// GetRecentImpacts 获取最近的影响事件
+func (m *MultiMonitor) GetRecentImpacts(n int) []types.ImpactEvent {
+	if m.impactAnalyzer == nil {
+		return []types.ImpactEvent{}
+	}
+	return m.impactAnalyzer.GetRecentImpacts(n)
+}
+
+// GetImpactSummary 获取影响统计摘要
+func (m *MultiMonitor) GetImpactSummary() map[string]interface{} {
+	if m.impactAnalyzer == nil {
+		return map[string]interface{}{"total": 0}
+	}
+	return m.impactAnalyzer.GetImpactSummary()
 }

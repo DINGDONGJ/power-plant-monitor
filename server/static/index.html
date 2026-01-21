@@ -178,7 +178,7 @@
         .target-card .card-actions { display: flex; gap: 8px; margin-top: 10px; }
         .target-card .card-actions .btn { flex: 1; margin-top: 0; }
         
-        .event-list { max-height: 500px; overflow-y: auto; }
+        .event-list { max-height: calc(100vh - 380px); overflow-y: auto; }
         .event-item { padding: 8px; border-bottom: 1px solid #222; font-size: 13px; }
         .event-item .time { color: #666; margin-right: 10px; }
         .event-item .type { font-weight: bold; margin-right: 10px; }
@@ -187,33 +187,146 @@
         .event-item .type-cpu_threshold { color: #ff00ff; }
         .event-item .type-new_process { color: #00ff00; }
         .event-item .type-process_gone { color: #ff8800; }
+        .event-item .type-impact_cpu { color: #ff6666; }
+        .event-item .type-impact_memory { color: #ffaa00; }
+        .event-item .type-impact_disk_io { color: #00aaff; }
+        .event-item .type-impact_network { color: #00ff88; }
+        .event-item .type-impact_file { color: #ff66ff; }
+        .event-item .type-impact_port { color: #6666ff; }
+        .event-item .type-impact_resolved { color: #00ff00; }
+        
+        /* 影响分析样式 */
+        .impact-summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .impact-stat-box {
+            background: #111;
+            border: 1px solid #333;
+            padding: 12px;
+            text-align: center;
+        }
+        .impact-stat-box.clickable { cursor: pointer; transition: all 0.2s; }
+        .impact-stat-box.clickable:hover { border-color: #666; background: #1a1a1a; }
+        .impact-stat-box.active { border-color: #00ff00 !important; box-shadow: 0 0 8px rgba(0,255,0,0.3); }
+        .impact-stat-box .stat-value { font-size: 24px; font-weight: bold; color: #00ff00; }
+        .impact-stat-box .stat-label { color: #888; font-size: 12px; margin-top: 4px; }
+        .impact-stat-box.critical .stat-value { color: #ff4444; }
+        .impact-stat-box.critical.active { border-color: #ff4444 !important; box-shadow: 0 0 8px rgba(255,68,68,0.3); }
+        .impact-stat-box.high .stat-value { color: #ff8800; }
+        .impact-stat-box.high.active { border-color: #ff8800 !important; box-shadow: 0 0 8px rgba(255,136,0,0.3); }
+        .impact-stat-box.medium .stat-value { color: #ffff00; }
+        .impact-stat-box.medium.active { border-color: #ffff00 !important; box-shadow: 0 0 8px rgba(255,255,0,0.3); }
+        
+        .impact-list { max-height: calc(100vh - 480px); overflow-y: auto; }
+        .impact-item {
+            background: #111;
+            border: 1px solid #333;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        .impact-item:hover { border-color: #444; }
+        .impact-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .impact-type {
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .impact-type.cpu { background: #3a1a1a; color: #ff6666; }
+        .impact-type.memory { background: #3a3a1a; color: #ffaa00; }
+        .impact-type.disk_io { background: #1a3a3a; color: #00aaff; }
+        .impact-type.network { background: #1a3a1a; color: #00ff88; }
+        .impact-type.file { background: #3a1a3a; color: #ff66ff; }
+        .impact-type.port { background: #1a1a3a; color: #6666ff; }
+        .impact-severity {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .impact-severity.critical { background: #4a0a0a; color: #ff4444; border: 1px solid #ff4444; }
+        .impact-severity.high { background: #4a2a0a; color: #ff8800; border: 1px solid #ff8800; }
+        .impact-severity.medium { background: #4a4a0a; color: #ffff00; border: 1px solid #ffff00; }
+        .impact-severity.low { background: #0a4a0a; color: #00ff00; border: 1px solid #00ff00; }
+        .impact-time { color: #666; font-size: 12px; }
+        .impact-desc { color: #ccc; margin-bottom: 8px; font-size: 13px; }
+        .impact-target { color: #00ffff; font-size: 12px; margin-bottom: 4px; }
+        .impact-source { color: #ff8800; font-size: 12px; margin-bottom: 8px; }
+        .impact-suggestion {
+            background: #0a0a0a;
+            border-left: 3px solid #00ff00;
+            padding: 8px;
+            color: #00ff00;
+            font-size: 12px;
+        }
+        
+        /* 分组卡片样式 */
+        .impact-group { border-left: 3px solid #444; }
+        .impact-group.critical { border-left-color: #ff4444; }
+        .impact-group.high { border-left-color: #ff8800; }
+        .impact-group.medium { border-left-color: #ffff00; }
+        .impact-group.low { border-left-color: #00ff00; }
+        .impact-source-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .impact-source-name { color: #ff8800; font-size: 15px; font-weight: bold; }
+        .impact-source-pid { color: #888; font-size: 12px; }
+        .impact-event-count { background: #222; color: #aaa; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+        .impact-types { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+        .impact-affected { color: #00ffff; font-size: 12px; margin-bottom: 8px; }
+        .impact-events-list { background: #0a0a0a; padding: 8px; margin-bottom: 8px; border-radius: 3px; }
+        .impact-event-detail { padding: 4px 0; border-bottom: 1px dotted #333; font-size: 12px; }
+        .impact-event-detail:last-child { border-bottom: none; }
+        .impact-expand-icon { color: #666; font-size: 10px; width: 12px; }
+        .impact-pid-count { background: #1a3a1a; color: #00ff88; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+        .impact-pid-summary { color: #888; font-size: 12px; margin: 4px 0; }
+        .impact-pid-list { margin: 8px 0; }
+        .impact-pid-item { background: #0d0d0d; border: 1px solid #2a2a2a; border-left: 2px solid #444; padding: 8px; margin-bottom: 6px; }
+        .impact-pid-item.critical { border-left-color: #ff4444; }
+        .impact-pid-item.high { border-left-color: #ff8800; }
+        .impact-pid-item.medium { border-left-color: #ffff00; }
+        .impact-pid-item.low { border-left-color: #00ff00; }
+        .impact-pid-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+        .impact-expandable:hover { background: #1a1a1a; }
         
         .stats { color: #888; font-size: 12px; }
         .drag-handle { cursor: grab; color: #666; margin-right: 5px; }
         .drag-handle:active { cursor: grabbing; }
         
-        /* 右键菜单样式 */
+        /* 右键菜单样式 - 五列布局 */
         .context-menu {
             display: none;
             position: fixed;
             background: #1a1a1a;
             border: 1px solid #444;
-            min-width: 150px;
             z-index: 1000;
             box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+            padding: 8px;
         }
         .context-menu.show { display: block; }
+        .context-menu-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 4px;
+        }
         .context-menu-item {
-            padding: 8px 12px;
+            padding: 6px 10px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
             color: #ccc;
-            font-size: 13px;
+            font-size: 12px;
+            white-space: nowrap;
+            border-radius: 3px;
         }
         .context-menu-item:hover { background: #2a2a2a; color: #00ff00; }
-        .context-menu-item .check { color: #00ff00; width: 16px; }
+        .context-menu-item .check { color: #00ff00; width: 14px; font-size: 11px; }
         
         /* 配置弹窗样式 */
         .modal-overlay {
@@ -317,6 +430,7 @@
         
         <div class="tabs">
             <button class="tab active" onclick="showPanel('processes')">全进程列表</button>
+            <button class="tab" onclick="showPanel('impacts')">影响分析</button>
             <button class="tab" onclick="showPanel('events')">事件日志</button>
         </div>
 
@@ -332,6 +446,35 @@
                     <thead><tr id="tableHeader"></tr></thead>
                     <tbody id="processTable"></tbody>
                 </table>
+            </div>
+        </div>
+
+        <div id="impacts" class="panel">
+            <div class="impact-summary" id="impactSummary">
+                <div class="impact-stat-box clickable" onclick="filterImpactsBySeverity('all')" id="impactBoxAll">
+                    <div class="stat-value" id="impactTotal">0</div>
+                    <div class="stat-label">总事件</div>
+                </div>
+                <div class="impact-stat-box medium clickable" onclick="filterImpactsBySeverity('medium')" id="impactBoxMedium">
+                    <div class="stat-value" id="impactMedium">0</div>
+                    <div class="stat-label">中级</div>
+                </div>
+                <div class="impact-stat-box high clickable" onclick="filterImpactsBySeverity('high')" id="impactBoxHigh">
+                    <div class="stat-value" id="impactHigh">0</div>
+                    <div class="stat-label">高级</div>
+                </div>
+                <div class="impact-stat-box critical clickable" onclick="filterImpactsBySeverity('critical')" id="impactBoxCritical">
+                    <div class="stat-value" id="impactCritical">0</div>
+                    <div class="stat-label">严重</div>
+                </div>
+            </div>
+            <div class="toolbar">
+                <button class="btn" onclick="refreshImpacts()">刷新</button>
+                <button class="btn" onclick="openImpactConfigModal()" style="margin-left:10px">⚙ 阈值设置</button>
+                <span class="stats" style="margin-left:auto" id="impactConfigInfo">CPU>80% | 内存>85% | 磁盘IO>100MB/s | 网络>100MB/s</span>
+            </div>
+            <div class="impact-list" id="impactList">
+                <div style="color:#666;padding:20px;text-align:center">暂无影响事件</div>
             </div>
         </div>
 
@@ -354,6 +497,37 @@
                 <div class="modal-buttons">
                     <button class="btn" onclick="closeConfigModal()">取消</button>
                     <button class="btn" onclick="saveConfig()" style="background:#003300">保存</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 影响分析阈值配置弹窗 -->
+        <div class="modal-overlay" id="impactConfigModal">
+            <div class="modal" style="min-width:450px">
+                <h3>⚙ 影响分析阈值配置</h3>
+                <div class="modal-row">
+                    <label>CPU 竞争阈值 (%)</label>
+                    <input type="number" id="impactCpuThreshold" min="0" max="100" step="1" placeholder="80">
+                    <span style="color:#666;font-size:11px">系统CPU超过此值时检测竞争</span>
+                </div>
+                <div class="modal-row">
+                    <label>内存压力阈值 (%)</label>
+                    <input type="number" id="impactMemThreshold" min="0" max="100" step="1" placeholder="85">
+                    <span style="color:#666;font-size:11px">系统内存超过此值时检测压力</span>
+                </div>
+                <div class="modal-row">
+                    <label>磁盘IO阈值 (MB/s)</label>
+                    <input type="number" id="impactDiskThreshold" min="0" step="10" placeholder="100">
+                    <span style="color:#666;font-size:11px">系统磁盘IO超过此值时检测</span>
+                </div>
+                <div class="modal-row">
+                    <label>网络带宽阈值 (MB/s)</label>
+                    <input type="number" id="impactNetThreshold" min="0" step="10" placeholder="100">
+                    <span style="color:#666;font-size:11px">系统网络流量超过此值时检测</span>
+                </div>
+                <div class="modal-buttons">
+                    <button class="btn" onclick="closeImpactConfigModal()">取消</button>
+                    <button class="btn" onclick="saveImpactConfig()" style="background:#003300">保存</button>
                 </div>
             </div>
         </div>
@@ -391,9 +565,11 @@
             'mem': 80,
             'memGrowth': 85,
             'vms': 80,
-            'pagedPool': 75,
-            'nonPagedPool': 75,
             'fds': 60,
+            'threads': 60,
+            'priority': 55,
+            'openFiles': 55,
+            'listenPorts': 100,
             'diskRead': 85,
             'diskWrite': 85,
             'netRecv': 85,
@@ -412,9 +588,11 @@
             { key: 'mem', title: '内存', sortable: true },
             { key: 'memGrowth', title: '内存增速', sortable: true },
             { key: 'vms', title: '虚拟内存', sortable: true },
-            { key: 'pagedPool', title: '页面池', sortable: true },
-            { key: 'nonPagedPool', title: '非页面池', sortable: true },
             { key: 'fds', title: '句柄', sortable: true },
+            { key: 'threads', title: '线程', sortable: true },
+            { key: 'priority', title: '优先级', sortable: true },
+            { key: 'openFiles', title: '文件数', sortable: true },
+            { key: 'listenPorts', title: '监听端口', sortable: false },
             { key: 'diskRead', title: '磁盘读', sortable: true },
             { key: 'diskWrite', title: '磁盘写', sortable: true },
             { key: 'netRecv', title: '网络收', sortable: true },
@@ -574,12 +752,12 @@
             document.removeEventListener('mouseup', stopResize);
         }
         
-        // 显示列选择菜单
+        // 显示列选择菜单（五列布局）
         function showColumnMenu(e) {
             e.preventDefault();
             const menu = document.getElementById('columnMenu');
             // 生成菜单项（排除 checkbox）
-            menu.innerHTML = allColumns.filter(c => c.key !== 'checkbox').map(col => {
+            const items = allColumns.filter(c => c.key !== 'checkbox').map(col => {
                 const visible = columnVisibility[col.key];
                 const checkMark = visible ? '✓' : '';
                 return `<div class="context-menu-item" onclick="toggleColumnVisibility('${col.key}')">
@@ -587,10 +765,11 @@
                     <span>${col.title}</span>
                 </div>`;
             }).join('');
+            menu.innerHTML = `<div class="context-menu-grid">${items}</div>`;
             
-            // 定位菜单
-            menu.style.left = e.clientX + 'px';
-            menu.style.top = e.clientY + 'px';
+            // 定位菜单（确保不超出屏幕）
+            menu.style.left = Math.min(e.clientX, window.innerWidth - 500) + 'px';
+            menu.style.top = Math.min(e.clientY, window.innerHeight - 150) + 'px';
             menu.classList.add('show');
             
             // 点击其他地方关闭菜单
@@ -963,6 +1142,8 @@
             
             if (name === 'processes') {
                 startProcessAutoRefresh();
+            } else if (name === 'impacts') {
+                startImpactAutoRefresh();
             } else if (name === 'events') {
                 refreshEvents();
                 startEventsAutoRefresh();
@@ -973,6 +1154,7 @@
             if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
             if (processRefreshInterval) { clearInterval(processRefreshInterval); processRefreshInterval = null; }
             if (eventsRefreshInterval) { clearInterval(eventsRefreshInterval); eventsRefreshInterval = null; }
+            if (impactRefreshInterval) { clearInterval(impactRefreshInterval); impactRefreshInterval = null; }
         }
         
         // 监控面板刷新（始终运行）
@@ -1080,6 +1262,18 @@
             const color = getDiskColor(bytesPerSec);
             return `<span style="color:${color}">${text}</span>`;
         }
+        
+        // 格式化监听端口列表
+        function formatListenPorts(ports) {
+            if (!ports || ports.length === 0) {
+                return '<span style="color:#666">-</span>';
+            }
+            // 显示前 3 个端口，超过则显示 ...
+            const display = ports.slice(0, 3).join(', ');
+            const more = ports.length > 3 ? ` +${ports.length - 3}` : '';
+            const title = ports.join(', ');
+            return `<span style="color:#00ffff" title="${title}">${display}${more}</span>`;
+        }
 
         function getCellValue(p, key, isGroup = false, group = null) {
             if (isGroup) {
@@ -1099,8 +1293,10 @@
                     case 'memGrowth': return formatMemGrowth(group.totalMemGrowth || 0);
                     case 'vms': return formatBytes(group.totalVms);
                     case 'fds': return `<span style="color:#888">${group.totalFds}</span>`;
-                    case 'pagedPool': return formatBytes(group.totalPagedPool);
-                    case 'nonPagedPool': return formatBytes(group.totalNonPagedPool);
+                    case 'threads': return `<span style="color:#888">${group.totalThreads}</span>`;
+                    case 'priority': return '<span style="color:#888">-</span>';
+                    case 'openFiles': return `<span style="color:#888">${group.totalOpenFiles || group.totalFds}</span>`;
+                    case 'listenPorts': return `<span style="color:#888">${group.totalListenPorts || '-'}</span>`;
                     case 'diskRead': return formatDiskRate(group.totalDiskRead);
                     case 'diskWrite': return formatDiskRate(group.totalDiskWrite);
                     case 'netRecv': return formatDiskRate(group.totalNetRecv);
@@ -1123,8 +1319,10 @@
                     case 'memGrowth': return formatMemGrowth(p.rss_growth_rate || 0);
                     case 'vms': return formatBytes(p.vms || 0);
                     case 'fds': return `<span style="color:#ccc">${p.num_fds || 0}</span>`;
-                    case 'pagedPool': return formatBytes(p.paged_pool || 0);
-                    case 'nonPagedPool': return formatBytes(p.non_paged_pool || 0);
+                    case 'threads': return `<span style="color:#ccc">${p.num_threads || 0}</span>`;
+                    case 'priority': return `<span style="color:#ccc">${p.priority || 8}</span>`;
+                    case 'openFiles': return `<span style="color:#ccc">${p.open_files || p.num_fds || 0}</span>`;
+                    case 'listenPorts': return formatListenPorts(p.listen_ports);
                     case 'diskRead': return formatDiskRate(p.disk_read_rate || 0);
                     case 'diskWrite': return formatDiskRate(p.disk_write_rate || 0);
                     case 'netRecv': return formatDiskRate(p.net_recv_rate || 0);
@@ -1154,14 +1352,15 @@
                 const totalMemGrowth = procs.reduce((sum, p) => sum + (p.rss_growth_rate || 0), 0);
                 const totalVms = procs.reduce((sum, p) => sum + (p.vms || 0), 0);
                 const totalFds = procs.reduce((sum, p) => sum + (p.num_fds || 0), 0);
-                const totalPagedPool = procs.reduce((sum, p) => sum + (p.paged_pool || 0), 0);
-                const totalNonPagedPool = procs.reduce((sum, p) => sum + (p.non_paged_pool || 0), 0);
+                const totalThreads = procs.reduce((sum, p) => sum + (p.num_threads || 0), 0);
                 const totalDiskRead = procs.reduce((sum, p) => sum + (p.disk_read_rate || 0), 0);
                 const totalDiskWrite = procs.reduce((sum, p) => sum + (p.disk_write_rate || 0), 0);
                 const totalNetRecv = procs.reduce((sum, p) => sum + (p.net_recv_rate || 0), 0);
                 const totalNetSend = procs.reduce((sum, p) => sum + (p.net_send_rate || 0), 0);
+                const totalOpenFiles = procs.reduce((sum, p) => sum + (p.open_files || p.num_fds || 0), 0);
+                const totalListenPorts = procs.reduce((sum, p) => sum + (p.listen_ports?.length || 0), 0);
                 const hasMonitored = procs.some(p => monitoredPids.has(p.pid));
-                return { name, procs, totalCpu, totalMem, totalMemGrowth, totalVms, totalFds, totalPagedPool, totalNonPagedPool, totalDiskRead, totalDiskWrite, totalNetRecv, totalNetSend, hasMonitored };
+                return { name, procs, totalCpu, totalMem, totalMemGrowth, totalVms, totalFds, totalThreads, totalDiskRead, totalDiskWrite, totalNetRecv, totalNetSend, totalOpenFiles, totalListenPorts, hasMonitored };
             });
             
             // 排序
@@ -1176,8 +1375,10 @@
                     case 'mem': valA = a.totalMem; valB = b.totalMem; break;
                     case 'vms': valA = a.totalVms; valB = b.totalVms; break;
                     case 'fds': valA = a.totalFds; valB = b.totalFds; break;
-                    case 'pagedPool': valA = a.totalPagedPool; valB = b.totalPagedPool; break;
-                    case 'nonPagedPool': valA = a.totalNonPagedPool; valB = b.totalNonPagedPool; break;
+                    case 'threads': valA = a.totalThreads; valB = b.totalThreads; break;
+                    case 'priority': valA = 0; valB = 0; break;
+                    case 'openFiles': valA = a.totalOpenFiles; valB = b.totalOpenFiles; break;
+                    case 'listenPorts': valA = a.totalListenPorts; valB = b.totalListenPorts; break;
                     case 'diskRead': valA = a.totalDiskRead; valB = b.totalDiskRead; break;
                     case 'diskWrite': valA = a.totalDiskWrite; valB = b.totalDiskWrite; break;
                     case 'netRecv': valA = a.totalNetRecv; valB = b.totalNetRecv; break;
@@ -1229,8 +1430,10 @@
                                 case 'mem': valA = a.rss_bytes; valB = b.rss_bytes; break;
                                 case 'vms': valA = a.vms || 0; valB = b.vms || 0; break;
                                 case 'fds': valA = a.num_fds || 0; valB = b.num_fds || 0; break;
-                                case 'pagedPool': valA = a.paged_pool || 0; valB = b.paged_pool || 0; break;
-                                case 'nonPagedPool': valA = a.non_paged_pool || 0; valB = b.non_paged_pool || 0; break;
+                                case 'threads': valA = a.num_threads || 0; valB = b.num_threads || 0; break;
+                                case 'priority': valA = a.priority || 8; valB = b.priority || 8; break;
+                                case 'openFiles': valA = a.open_files || 0; valB = b.open_files || 0; break;
+                                case 'listenPorts': valA = (a.listen_ports?.length || 0); valB = (b.listen_ports?.length || 0); break;
                                 case 'diskRead': valA = a.disk_read_rate || 0; valB = b.disk_read_rate || 0; break;
                                 case 'diskWrite': valA = a.disk_write_rate || 0; valB = b.disk_write_rate || 0; break;
                                 case 'netRecv': valA = a.net_recv_rate || 0; valB = b.net_recv_rate || 0; break;
@@ -1400,9 +1603,9 @@
                     case 'cpu': valA = a.cpu_pct || 0; valB = b.cpu_pct || 0; break;
                     case 'mem': valA = a.rss_bytes || 0; valB = b.rss_bytes || 0; break;
                     case 'vms': valA = a.vms || 0; valB = b.vms || 0; break;
-                    case 'pagedPool': valA = a.paged_pool || 0; valB = b.paged_pool || 0; break;
-                    case 'nonPagedPool': valA = a.non_paged_pool || 0; valB = b.non_paged_pool || 0; break;
                     case 'fds': valA = a.num_fds || 0; valB = b.num_fds || 0; break;
+                    case 'threads': valA = a.num_threads || 0; valB = b.num_threads || 0; break;
+                    case 'priority': valA = a.priority || 8; valB = b.priority || 8; break;
                     case 'diskRead': valA = a.disk_read_rate || 0; valB = b.disk_read_rate || 0; break;
                     case 'diskWrite': valA = a.disk_write_rate || 0; valB = b.disk_write_rate || 0; break;
                     case 'netRecv': valA = a.net_recv_rate || 0; valB = b.net_recv_rate || 0; break;
@@ -1464,9 +1667,9 @@
                 case 'cpu': return p ? p.cpu_pct.toFixed(2) : '-';
                 case 'mem': return p ? formatBytes(p.rss_bytes) : '-';
                 case 'vms': return p ? formatBytes(p.vms || 0) : '-';
-                case 'pagedPool': return p ? formatBytes(p.paged_pool || 0) : '-';
-                case 'nonPagedPool': return p ? formatBytes(p.non_paged_pool || 0) : '-';
                 case 'fds': return `<span style="color:#ccc">${p ? (p.num_fds || 0) : '-'}</span>`;
+                case 'threads': return `<span style="color:#ccc">${p ? (p.num_threads || 0) : '-'}</span>`;
+                case 'priority': return `<span style="color:#ccc">${p ? (p.priority || 8) : '-'}</span>`;
                 case 'diskRead': return p ? formatDiskRate(p.disk_read_rate || 0) : '-';
                 case 'diskWrite': return p ? formatDiskRate(p.disk_write_rate || 0) : '-';
                 case 'netRecv': return p ? formatDiskRate(p.net_recv_rate || 0) : '-';
@@ -1565,7 +1768,18 @@
                 container.innerHTML = '<p style="color:#666;padding:20px">暂无事件</p>';
                 return;
             }
-            const typeMap = { exit: '退出', new_process: '新进程', process_gone: '进程消失' };
+            const typeMap = {
+                exit: '退出',
+                new_process: '新进程',
+                process_gone: '进程消失',
+                impact_cpu: 'CPU影响',
+                impact_memory: '内存影响',
+                impact_disk_io: '磁盘IO影响',
+                impact_network: '网络影响',
+                impact_file: '文件冲突',
+                impact_port: '端口冲突',
+                impact_resolved: '影响解除'
+            };
             container.innerHTML = events.slice().reverse().map(e => {
                 // 尝试从缓存获取别名
                 const target = targetConfigs[e.pid];
@@ -1579,12 +1793,332 @@
             `}).join('');
         }
 
+        // 影响分析相关函数
+        let impactRefreshInterval = null;
+        let allImpacts = [];  // 缓存所有影响事件
+        let currentSeverityFilter = 'all';  // 当前过滤级别
+        
+        async function refreshImpacts() {
+            try {
+                const [impactsRes, summaryRes] = await Promise.all([
+                    fetch('/api/impacts?n=50'),
+                    fetch('/api/impacts/summary')
+                ]);
+                allImpacts = await impactsRes.json();
+                const summary = await summaryRes.json();
+                renderImpactSummary(summary);
+                renderImpacts(filterImpactsByCurrentSeverity());
+            } catch (e) {
+                console.error('获取影响数据失败:', e);
+            }
+        }
+        
+        function filterImpactsByCurrentSeverity() {
+            if (currentSeverityFilter === 'all') return allImpacts;
+            return allImpacts.filter(imp => imp.severity === currentSeverityFilter);
+        }
+        
+        function filterImpactsBySeverity(severity) {
+            currentSeverityFilter = severity;
+            // 更新选中状态
+            document.querySelectorAll('.impact-stat-box').forEach(box => box.classList.remove('active'));
+            if (severity === 'all') {
+                document.getElementById('impactBoxAll').classList.add('active');
+            } else if (severity === 'medium') {
+                document.getElementById('impactBoxMedium').classList.add('active');
+            } else if (severity === 'high') {
+                document.getElementById('impactBoxHigh').classList.add('active');
+            } else if (severity === 'critical') {
+                document.getElementById('impactBoxCritical').classList.add('active');
+            }
+            renderImpacts(filterImpactsByCurrentSeverity());
+        }
+        
+        function renderImpactSummary(summary) {
+            document.getElementById('impactTotal').textContent = summary.total || 0;
+            const bySeverity = summary.by_severity || {};
+            document.getElementById('impactCritical').textContent = bySeverity.critical || 0;
+            document.getElementById('impactHigh').textContent = bySeverity.high || 0;
+            document.getElementById('impactMedium').textContent = bySeverity.medium || 0;
+        }
+        
+        // 跟踪展开状态
+        let expandedImpactGroups = new Set();
+        
+        function toggleImpactGroup(name) {
+            if (expandedImpactGroups.has(name)) {
+                expandedImpactGroups.delete(name);
+            } else {
+                expandedImpactGroups.add(name);
+            }
+            renderImpacts(filterImpactsByCurrentSeverity());
+        }
+        
+        function renderImpacts(impacts) {
+            const container = document.getElementById('impactList');
+            if (!impacts || impacts.length === 0) {
+                const filterText = currentSeverityFilter === 'all' ? '' : `级别为「${{'medium':'中级','high':'高级','critical':'严重'}[currentSeverityFilter]}」的`;
+                container.innerHTML = `<div style="color:#666;padding:20px;text-align:center">暂无${filterText}影响事件</div>`;
+                return;
+            }
+            
+            const typeNames = {
+                cpu: 'CPU竞争',
+                memory: '内存压力',
+                disk_io: '磁盘IO',
+                network: '网络带宽',
+                file: '文件占用',
+                port: '端口占用'
+            };
+            
+            const severityNames = {
+                critical: '严重',
+                high: '高',
+                medium: '中',
+                low: '低'
+            };
+            
+            const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+            
+            // 第一层：按进程名分组
+            const groupedByName = {};
+            impacts.forEach(imp => {
+                const name = imp.source_name;
+                if (!groupedByName[name]) {
+                    groupedByName[name] = {
+                        source_name: name,
+                        pids: {},  // 按PID细分
+                        allEvents: [],
+                        maxSeverity: 'low',
+                        latestTime: imp.timestamp
+                    };
+                }
+                const group = groupedByName[name];
+                group.allEvents.push(imp);
+                
+                // 按PID细分
+                const pid = imp.source_pid;
+                if (!group.pids[pid]) {
+                    group.pids[pid] = {
+                        source_pid: pid,
+                        events: [],
+                        maxSeverity: 'low',
+                        latestTime: imp.timestamp
+                    };
+                }
+                group.pids[pid].events.push(imp);
+                if (severityOrder[imp.severity] < severityOrder[group.pids[pid].maxSeverity]) {
+                    group.pids[pid].maxSeverity = imp.severity;
+                }
+                if (new Date(imp.timestamp) > new Date(group.pids[pid].latestTime)) {
+                    group.pids[pid].latestTime = imp.timestamp;
+                }
+                
+                // 更新组级别统计
+                if (severityOrder[imp.severity] < severityOrder[group.maxSeverity]) {
+                    group.maxSeverity = imp.severity;
+                }
+                if (new Date(imp.timestamp) > new Date(group.latestTime)) {
+                    group.latestTime = imp.timestamp;
+                }
+            });
+            
+            // 排序
+            const groups = Object.values(groupedByName).sort((a, b) => {
+                if (severityOrder[a.maxSeverity] !== severityOrder[b.maxSeverity]) {
+                    return severityOrder[a.maxSeverity] - severityOrder[b.maxSeverity];
+                }
+                return new Date(b.latestTime) - new Date(a.latestTime);
+            });
+            
+            container.innerHTML = groups.map(group => {
+                const pidList = Object.values(group.pids).sort((a, b) => {
+                    if (severityOrder[a.maxSeverity] !== severityOrder[b.maxSeverity]) {
+                        return severityOrder[a.maxSeverity] - severityOrder[b.maxSeverity];
+                    }
+                    return new Date(b.latestTime) - new Date(a.latestTime);
+                });
+                const pidCount = pidList.length;
+                const isExpanded = expandedImpactGroups.has(group.source_name);
+                
+                // 统计整个进程名的类型
+                const typeCounts = {};
+                const affectedTargets = new Set();
+                group.allEvents.forEach(e => {
+                    typeCounts[e.impact_type] = (typeCounts[e.impact_type] || 0) + 1;
+                    affectedTargets.add(`${e.target_name} (PID:${e.target_pid})`);
+                });
+                
+                const typeTags = Object.entries(typeCounts).map(([type, count]) => 
+                    `<span class="impact-type ${type}">${typeNames[type] || type}${count > 1 ? ' x' + count : ''}</span>`
+                ).join(' ');
+                
+                // 如果只有一个PID，直接显示详情
+                if (pidCount === 1) {
+                    const pidInfo = pidList[0];
+                    const eventDetails = pidInfo.events.slice(0, 5).map(e => 
+                        `<div class="impact-event-detail">
+                            <span class="impact-severity ${e.severity}">${severityNames[e.severity]}</span>
+                            <span style="color:#888;margin-left:8px">${new Date(e.timestamp).toLocaleTimeString('zh-CN')}</span>
+                            <span style="margin-left:8px">${e.description}</span>
+                        </div>`
+                    ).join('');
+                    const moreCount = pidInfo.events.length > 5 ? `<div style="color:#666;font-size:11px;margin-top:4px">… 还有 ${pidInfo.events.length - 5} 条事件</div>` : '';
+                    
+                    return `
+                    <div class="impact-item impact-group ${group.maxSeverity}">
+                        <div class="impact-header">
+                            <div class="impact-source-info">
+                                <span class="impact-severity ${group.maxSeverity}">${severityNames[group.maxSeverity]}</span>
+                                <span class="impact-source-name">${group.source_name}</span>
+                                <span class="impact-source-pid">PID: ${pidInfo.source_pid}</span>
+                                <span class="impact-event-count">${pidInfo.events.length} 个事件</span>
+                            </div>
+                            <span class="impact-time">${new Date(group.latestTime).toLocaleString('zh-CN')}</span>
+                        </div>
+                        <div class="impact-types">${typeTags}</div>
+                        <div class="impact-affected">影响目标: ${[...affectedTargets].join(', ')}</div>
+                        <div class="impact-events-list">${eventDetails}${moreCount}</div>
+                        <div class="impact-suggestion">💡 ${pidInfo.events[0].suggestion}</div>
+                    </div>`;
+                }
+                
+                // 多个PID，显示可展开的卡片
+                const pidSummary = pidList.map(p => p.source_pid).slice(0, 3).join(', ') + (pidCount > 3 ? ` 等${pidCount}个` : '');
+                
+                let pidDetailsHtml = '';
+                if (isExpanded) {
+                    pidDetailsHtml = `<div class="impact-pid-list">${pidList.map(pidInfo => {
+                        const pidTypeCounts = {};
+                        pidInfo.events.forEach(e => {
+                            pidTypeCounts[e.impact_type] = (pidTypeCounts[e.impact_type] || 0) + 1;
+                        });
+                        const pidTypeTags = Object.entries(pidTypeCounts).map(([type, count]) => 
+                            `<span class="impact-type ${type}" style="font-size:10px;padding:1px 5px">${typeNames[type] || type}${count > 1 ? ' x' + count : ''}</span>`
+                        ).join(' ');
+                        
+                        const eventDetails = pidInfo.events.slice(0, 3).map(e => 
+                            `<div class="impact-event-detail">
+                                <span class="impact-severity ${e.severity}">${severityNames[e.severity]}</span>
+                                <span style="color:#888;margin-left:8px">${new Date(e.timestamp).toLocaleTimeString('zh-CN')}</span>
+                                <span style="margin-left:8px">${e.description}</span>
+                            </div>`
+                        ).join('');
+                        const moreCount = pidInfo.events.length > 3 ? `<div style="color:#666;font-size:10px;margin-top:2px">… 还有 ${pidInfo.events.length - 3} 条</div>` : '';
+                        
+                        return `
+                        <div class="impact-pid-item ${pidInfo.maxSeverity}">
+                            <div class="impact-pid-header">
+                                <span class="impact-severity ${pidInfo.maxSeverity}">${severityNames[pidInfo.maxSeverity]}</span>
+                                <span style="color:#aaa">PID: ${pidInfo.source_pid}</span>
+                                <span style="color:#666;font-size:11px">${pidInfo.events.length} 个事件</span>
+                                <span style="margin-left:auto;color:#666;font-size:11px">${new Date(pidInfo.latestTime).toLocaleTimeString('zh-CN')}</span>
+                            </div>
+                            <div style="margin:4px 0">${pidTypeTags}</div>
+                            <div class="impact-events-list" style="margin:4px 0;padding:6px">${eventDetails}${moreCount}</div>
+                        </div>`;
+                    }).join('')}</div>`;
+                }
+                
+                return `
+                <div class="impact-item impact-group ${group.maxSeverity}">
+                    <div class="impact-header impact-expandable" onclick="toggleImpactGroup('${group.source_name.replace(/'/g, "\\'")}')"
+                         style="cursor:pointer" title="点击展开/收起">
+                        <div class="impact-source-info">
+                            <span class="impact-expand-icon">${isExpanded ? '▼' : '▶'}</span>
+                            <span class="impact-severity ${group.maxSeverity}">${severityNames[group.maxSeverity]}</span>
+                            <span class="impact-source-name">${group.source_name}</span>
+                            <span class="impact-pid-count">${pidCount} 个进程</span>
+                            <span class="impact-event-count">${group.allEvents.length} 个事件</span>
+                        </div>
+                        <span class="impact-time">${new Date(group.latestTime).toLocaleString('zh-CN')}</span>
+                    </div>
+                    <div class="impact-types">${typeTags}</div>
+                    <div class="impact-affected">影响目标: ${[...affectedTargets].join(', ')}</div>
+                    ${isExpanded ? '' : `<div class="impact-pid-summary">PID: ${pidSummary}</div>`}
+                    ${pidDetailsHtml}
+                    <div class="impact-suggestion">💡 ${group.allEvents[0].suggestion}</div>
+                </div>`;
+            }).join('');
+        }
+        
+        function startImpactAutoRefresh() {
+            if (impactRefreshInterval) return;
+            refreshImpacts();
+            impactRefreshInterval = setInterval(refreshImpacts, 5000);
+        }
+        
+        function stopImpactAutoRefresh() {
+            if (impactRefreshInterval) {
+                clearInterval(impactRefreshInterval);
+                impactRefreshInterval = null;
+            }
+        }
+        
+        // 影响分析配置
+        let currentImpactConfig = {};
+        
+        async function loadImpactConfig() {
+            try {
+                const res = await fetch('/api/config/impact');
+                currentImpactConfig = await res.json();
+                updateImpactConfigInfo();
+            } catch (e) {
+                console.error('加载影响配置失败:', e);
+            }
+        }
+        
+        function updateImpactConfigInfo() {
+            const c = currentImpactConfig;
+            document.getElementById('impactConfigInfo').textContent = 
+                `CPU>${c.cpu_threshold||80}% | 内存>${c.memory_threshold||85}% | 磁盘IO>${c.disk_io_threshold||100}MB/s | 网络>${c.network_threshold||100}MB/s`;
+        }
+        
+        function openImpactConfigModal() {
+            document.getElementById('impactCpuThreshold').value = currentImpactConfig.cpu_threshold || 80;
+            document.getElementById('impactMemThreshold').value = currentImpactConfig.memory_threshold || 85;
+            document.getElementById('impactDiskThreshold').value = currentImpactConfig.disk_io_threshold || 100;
+            document.getElementById('impactNetThreshold').value = currentImpactConfig.network_threshold || 100;
+            document.getElementById('impactConfigModal').classList.add('show');
+        }
+        
+        function closeImpactConfigModal() {
+            document.getElementById('impactConfigModal').classList.remove('show');
+        }
+        
+        async function saveImpactConfig() {
+            const config = {
+                ...currentImpactConfig,
+                cpu_threshold: parseFloat(document.getElementById('impactCpuThreshold').value) || 80,
+                memory_threshold: parseFloat(document.getElementById('impactMemThreshold').value) || 85,
+                disk_io_threshold: parseFloat(document.getElementById('impactDiskThreshold').value) || 100,
+                network_threshold: parseFloat(document.getElementById('impactNetThreshold').value) || 100
+            };
+            try {
+                const res = await fetch('/api/config/impact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                if (res.ok) {
+                    currentImpactConfig = config;
+                    updateImpactConfigInfo();
+                    closeImpactConfigModal();
+                } else {
+                    alert('保存失败: ' + (await res.text()));
+                }
+            } catch (e) {
+                alert('保存失败: ' + e.message);
+            }
+        }
+
         // 初始化
         renderTableHeader();
         startSystemRefresh();
         startMonitorRefresh();  // 监控面板始终刷新
         startProcessAutoRefresh();
         startRainbowAnimation();  // 启动彩虹呼吸动画
+        loadImpactConfig();       // 加载影响分析配置
         
         // 登出函数
         async function logout() {

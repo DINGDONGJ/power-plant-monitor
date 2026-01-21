@@ -26,5 +26,17 @@
     "interval": 1,
     "metrics_buffer_len": 300,
     "events_buffer_len": 100
+  },
+  "impact": {
+    "enabled": true,
+    "analysis_interval": 5,
+    "cpu_threshold": 20,
+    "memory_threshold": 50,
+    "disk_io_threshold": 100,
+    "network_threshold": 100,
+    "top_n_processes": 10,
+    "history_len": 100,
+    "file_check_interval": 30,
+    "port_check_interval": 30
   }
 }

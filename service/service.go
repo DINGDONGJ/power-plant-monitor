@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"monitor-agent/config"
+	"monitor-agent/impact"
 	"monitor-agent/monitor"
 	"monitor-agent/provider"
 	"monitor-agent/server"
@@ -74,6 +75,22 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 		return nil, fmt.Errorf("create multi monitor: %w", err)
 	}
 
+	// 创建影响分析器
+	if appCfg.Impact.Enabled {
+		analyzer := impact.NewImpactAnalyzer(
+			appCfg.Impact,
+			prov,
+			mm.GetTargets,
+			mm.ListAllProcesses,
+		)
+		// 设置事件回调，将影响事件记录到事件日志
+		analyzer.SetEventCallback(func(eventType string, pid int32, name string, message string) {
+			mm.AddImpactEvent(eventType, pid, name, message)
+		})
+		mm.SetImpactAnalyzer(analyzer)
+		log.Printf("[SERVICE] Impact analyzer enabled (interval=%ds)", appCfg.Impact.AnalysisInterval)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Service{
@@ -100,7 +117,7 @@ func (s *Service) Start() error {
 
 	// 启动 HTTP 服务器（如果启用）
 	if s.appConfig.Server.Enabled {
-		webSrv := server.NewWebServer(s.mm)
+		webSrv := server.NewWebServerWithConfig(s.mm, server.AuthConfig{}, s.appConfig, s.config.ConfigFile)
 		s.httpServer = &http.Server{
 			Addr:    s.config.Addr,
 			Handler: webSrv,

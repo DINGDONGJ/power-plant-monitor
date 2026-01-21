@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"sync"
 
+	"monitor-agent/config"
 	"monitor-agent/monitor"
 	"monitor-agent/types"
 )
@@ -20,17 +22,28 @@ type WebServer struct {
 	authManager  *AuthManager
 	mux          *http.ServeMux
 	handler      http.Handler
+	
+	// 配置管理
+	configMu     sync.RWMutex
+	appConfig    *config.Config
+	configFile   string
 }
 
 func NewWebServer(mm *monitor.MultiMonitor) *WebServer {
-	return NewWebServerWithAuth(mm, AuthConfig{})
+	return NewWebServerWithAuth(mm, AuthConfig{}, nil, "")
 }
 
-func NewWebServerWithAuth(mm *monitor.MultiMonitor, authCfg AuthConfig) *WebServer {
+func NewWebServerWithConfig(mm *monitor.MultiMonitor, authCfg AuthConfig, appCfg *config.Config, configFile string) *WebServer {
+	return NewWebServerWithAuth(mm, authCfg, appCfg, configFile)
+}
+
+func NewWebServerWithAuth(mm *monitor.MultiMonitor, authCfg AuthConfig, appCfg *config.Config, configFile string) *WebServer {
 	s := &WebServer{
 		multiMonitor: mm,
 		authManager:  NewAuthManager(authCfg),
 		mux:          http.NewServeMux(),
+		appConfig:    appCfg,
+		configFile:   configFile,
 	}
 
 	// 登录相关路由（不需要认证）
@@ -53,6 +66,9 @@ func NewWebServerWithAuth(mm *monitor.MultiMonitor, authCfg AuthConfig) *WebServ
 	s.mux.HandleFunc("/api/process-changes", s.handleProcessChanges)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/system", s.handleSystem)
+	s.mux.HandleFunc("/api/impacts", s.handleImpacts)
+	s.mux.HandleFunc("/api/impacts/summary", s.handleImpactsSummary)
+	s.mux.HandleFunc("/api/config/impact", s.handleImpactConfig)
 
 	// 静态文件
 	staticFS, _ := fs.Sub(staticFiles, "static")
@@ -253,4 +269,75 @@ func (s *WebServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonResponse(w, metrics)
+}
+
+// GET /api/impacts?n=50 - 获取最近影响事件
+func (s *WebServer) handleImpacts(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	if n <= 0 {
+		n = 50
+	}
+	impacts := s.multiMonitor.GetRecentImpacts(n)
+	if impacts == nil {
+		impacts = []types.ImpactEvent{}
+	}
+	s.jsonResponse(w, impacts)
+}
+
+// GET /api/impacts/summary - 获取影响统计摘要
+func (s *WebServer) handleImpactsSummary(w http.ResponseWriter, r *http.Request) {
+	summary := s.multiMonitor.GetImpactSummary()
+	s.jsonResponse(w, summary)
+}
+
+// GET/POST /api/config/impact - 获取或更新影响分析配置
+func (s *WebServer) handleImpactConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		s.configMu.RLock()
+		defer s.configMu.RUnlock()
+		
+		if s.appConfig == nil {
+			s.jsonResponse(w, config.DefaultConfig().Impact)
+			return
+		}
+		s.jsonResponse(w, s.appConfig.Impact)
+		return
+	}
+	
+	if r.Method == "POST" {
+		var newCfg types.ImpactConfig
+		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
+			s.errorResponse(w, 400, "invalid request body: "+err.Error())
+			return
+		}
+		
+		s.configMu.Lock()
+		defer s.configMu.Unlock()
+		
+		if s.appConfig == nil {
+			s.appConfig = config.DefaultConfig()
+		}
+		
+		// 更新配置
+		s.appConfig.Impact = newCfg
+		
+		// 保存到文件
+		if s.configFile != "" {
+			if err := config.SaveConfig(s.configFile, s.appConfig); err != nil {
+				s.errorResponse(w, 500, "save config failed: "+err.Error())
+				return
+			}
+		}
+		
+		// 更新影响分析器配置
+		analyzer := s.multiMonitor.GetImpactAnalyzer()
+		if analyzer != nil {
+			analyzer.UpdateConfig(newCfg)
+		}
+		
+		s.jsonResponse(w, map[string]string{"status": "ok"})
+		return
+	}
+	
+	s.errorResponse(w, 405, "method not allowed")
 }

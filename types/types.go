@@ -38,11 +38,12 @@ type ProcessInfo struct {
 	RSSBytes      uint64  `json:"rss_bytes"`
 	RSSGrowthRate float64 `json:"rss_growth_rate"` // RSS 增长速率 (B/s)
 	VMS           uint64  `json:"vms"`             // 虚拟内存大小
-	PagedPool     uint64  `json:"paged_pool"`      // 页面缓冲池
-	NonPagedPool  uint64  `json:"non_paged_pool"`  // 非页面缓冲池
 	Status        string  `json:"status"`
 	Username      string  `json:"username"`        // 发布者/用户
 	NumFDs        int32   `json:"num_fds"`         // 句柄数/文件描述符数
+	NumThreads    int32   `json:"num_threads"`     // 线程数
+	Priority      int32   `json:"priority"`        // 进程优先级
+	Nice          int32   `json:"nice"`            // Nice 值 (Linux)
 	DiskIO        float64 `json:"disk_io"`         // 磁盘速率 (B/s) - 保留兼容
 	DiskReadRate  float64 `json:"disk_read_rate"`  // 磁盘读取速率 (B/s)
 	DiskWriteRate float64 `json:"disk_write_rate"` // 磁盘写入速率 (B/s)
@@ -52,14 +53,18 @@ type ProcessInfo struct {
 	NetSendRate   float64 `json:"net_send_rate"`   // 网络发送速率 (B/s)
 	Uptime        int64   `json:"uptime"`          // 已运行时间（秒）
 	Cmdline       string  `json:"cmdline"`         // 命令行
+	OpenFiles     int     `json:"open_files"`      // 打开的文件数
+	ListenPorts   []int   `json:"listen_ports"`    // 监听的端口列表
 }
 
 // MonitorTarget 监控目标
 type MonitorTarget struct {
-	PID     int32  `json:"pid"`
-	Name    string `json:"name"`            // 进程名
-	Alias   string `json:"alias,omitempty"` // 备注名称（如：电力监控主进程）
-	Cmdline string `json:"cmdline,omitempty"`
+	PID        int32    `json:"pid"`
+	Name       string   `json:"name"`                  // 进程名
+	Alias      string   `json:"alias,omitempty"`       // 备注名称（如：电力监控主进程）
+	Cmdline    string   `json:"cmdline,omitempty"`
+	WatchFiles []string `json:"watch_files,omitempty"` // 需要监控的关键文件路径
+	WatchPorts []int    `json:"watch_ports,omitempty"` // 需要监控的端口列表
 }
 
 // MultiMonitorConfig 多进程监控配置
@@ -79,6 +84,11 @@ type SystemMetrics struct {
 	CPUSystem  float64 `json:"cpu_system"`  // 内核态 CPU%
 	CPUIowait  float64 `json:"cpu_iowait"`  // IO 等待 CPU%
 	CPUIdle    float64 `json:"cpu_idle"`    // 空闲 CPU%
+
+	// 负载指标 (Linux)
+	LoadAvg1  float64 `json:"load_avg_1"`  // 1 分钟负载
+	LoadAvg5  float64 `json:"load_avg_5"`  // 5 分钟负载
+	LoadAvg15 float64 `json:"load_avg_15"` // 15 分钟负载
 
 	// 内存指标
 	MemoryTotal     uint64  `json:"memory_total"`
@@ -104,4 +114,50 @@ type SystemMetrics struct {
 	DiskWriteRate float64 `json:"disk_write_rate"` // 磁盘写入速率 (B/s)
 	DiskReadOps   float64 `json:"disk_read_ops"`   // 磁盘读取 IOPS
 	DiskWriteOps  float64 `json:"disk_write_ops"`  // 磁盘写入 IOPS
+
+	// 系统统计
+	ProcessCount int `json:"process_count"` // 进程总数
+	ThreadCount  int `json:"thread_count"`  // 线程总数
+}
+
+// ImpactEvent 影响事件
+type ImpactEvent struct {
+	Timestamp   time.Time     `json:"timestamp"`
+	TargetPID   int32         `json:"target_pid"`   // 被影响的监控目标 PID
+	TargetName  string        `json:"target_name"`  // 被影响的监控目标名称
+	ImpactType  string        `json:"impact_type"`  // cpu/memory/disk_io/network/file/port
+	Severity    string        `json:"severity"`     // low/medium/high/critical
+	SourcePID   int32         `json:"source_pid"`   // 影响源进程 PID
+	SourceName  string        `json:"source_name"`  // 影响源进程名
+	Description string        `json:"description"`  // 影响描述
+	Metrics     ImpactMetrics `json:"metrics"`      // 相关指标
+	Suggestion  string        `json:"suggestion"`   // 处理建议
+}
+
+// ImpactMetrics 影响相关指标
+type ImpactMetrics struct {
+	SystemCPU    float64 `json:"system_cpu"`     // 系统 CPU 使用率
+	SystemMemory float64 `json:"system_memory"`  // 系统内存使用率
+	TargetCPU    float64 `json:"target_cpu"`     // 目标进程 CPU
+	TargetMemory uint64  `json:"target_memory"`  // 目标进程内存
+	SourceCPU    float64 `json:"source_cpu"`     // 影响源 CPU
+	SourceMemory uint64  `json:"source_memory"`  // 影响源内存
+	SourceDiskIO float64 `json:"source_disk_io"` // 影响源磁盘IO
+	SourceNetIO  float64 `json:"source_net_io"`  // 影响源网络IO
+	ConflictFile string  `json:"conflict_file,omitempty"` // 冲突文件路径
+	ConflictPort int     `json:"conflict_port,omitempty"` // 冲突端口
+}
+
+// ImpactConfig 影响分析配置
+type ImpactConfig struct {
+	Enabled           bool    `json:"enabled"`              // 是否启用
+	AnalysisInterval  int     `json:"analysis_interval"`    // 分析间隔（秒），默认5
+	CPUThreshold      float64 `json:"cpu_threshold"`        // CPU 竞争阈值（%），默认80
+	MemoryThreshold   float64 `json:"memory_threshold"`     // 内存压力阈值（%），默认85
+	DiskIOThreshold   float64 `json:"disk_io_threshold"`    // 磁盘IO阈值（MB/s），默认100
+	NetworkThreshold  float64 `json:"network_threshold"`    // 网络IO阈值（MB/s），默认100
+	TopNProcesses     int     `json:"top_n_processes"`      // 分析 Top N 进程，默认10
+	HistoryLen        int     `json:"history_len"`          // 影响记录保留数量，默认100
+	FileCheckInterval int     `json:"file_check_interval"`  // 文件检测间隔（秒），默认30
+	PortCheckInterval int     `json:"port_check_interval"`  // 端口检测间隔（秒），默认30
 }

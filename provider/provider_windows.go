@@ -15,6 +15,7 @@ var (
 	procOpenProcess           = modkernel32.NewProc("OpenProcess")
 	procCloseHandle           = modkernel32.NewProc("CloseHandle")
 	procGetProcessMemoryInfo  = modpsapi.NewProc("GetProcessMemoryInfo")
+	procGetPriorityClass      = modkernel32.NewProc("GetPriorityClass")
 )
 
 const (
@@ -57,31 +58,42 @@ func getProcessHandleCount(pid int32) int32 {
 	return int32(count)
 }
 
-// getProcessMemoryPools 获取进程内存池信息
-func getProcessMemoryPools(pid int32) (pagedPool, nonPagedPool uint64) {
+// getProcessPriority 获取进程优先级
+func getProcessPriority(pid int32) int32 {
 	handle, _, _ := procOpenProcess.Call(
-		uintptr(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ),
+		uintptr(PROCESS_QUERY_INFORMATION),
 		0,
 		uintptr(pid),
 	)
 	if handle == 0 {
-		return 0, 0
+		return 0
 	}
 	defer procCloseHandle.Call(handle)
 
-	var memCounters processMemoryCountersEx
-	memCounters.CB = uint32(unsafe.Sizeof(memCounters))
-
-	ret, _, _ := procGetProcessMemoryInfo.Call(
-		handle,
-		uintptr(unsafe.Pointer(&memCounters)),
-		uintptr(memCounters.CB),
-	)
-	if ret == 0 {
-		return 0, 0
+	priorityClass, _, _ := procGetPriorityClass.Call(handle)
+	// 将 Windows 优先级类到数值的映射
+	// IDLE_PRIORITY_CLASS (0x40) = 4
+	// BELOW_NORMAL_PRIORITY_CLASS (0x4000) = 6
+	// NORMAL_PRIORITY_CLASS (0x20) = 8
+	// ABOVE_NORMAL_PRIORITY_CLASS (0x8000) = 10
+	// HIGH_PRIORITY_CLASS (0x80) = 13
+	// REALTIME_PRIORITY_CLASS (0x100) = 24
+	switch priorityClass {
+	case 0x40:
+		return 4 // Idle
+	case 0x4000:
+		return 6 // Below Normal
+	case 0x20:
+		return 8 // Normal
+	case 0x8000:
+		return 10 // Above Normal
+	case 0x80:
+		return 13 // High
+	case 0x100:
+		return 24 // Realtime
+	default:
+		return 8 // Default to Normal
 	}
-
-	return uint64(memCounters.QuotaPagedPoolUsage), uint64(memCounters.QuotaNonPagedPoolUsage)
 }
 
 func New() ProcProvider {
@@ -96,7 +108,7 @@ func New() ProcProvider {
 		},
 		// getHandleCount: Windows 使用 GetProcessHandleCount API
 		getProcessHandleCount,
-		// getMemoryPools: Windows 使用 GetProcessMemoryInfo API
-		getProcessMemoryPools,
+		// getPriority: Windows 使用 GetPriorityClass API
+		getProcessPriority,
 	)
 }

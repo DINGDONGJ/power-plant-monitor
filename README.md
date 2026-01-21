@@ -188,6 +188,11 @@ GOOS=linux go build -o monitor-web ./cmd/web
 | 磁盘写入速率 | `disk_write_rate` | gopsutil `disk.IOCounters()` | 系统磁盘写入速率 (B/s) |
 | 磁盘读取 IOPS | `disk_read_ops` | gopsutil `disk.IOCounters()` | 每秒磁盘读取操作数 |
 | 磁盘写入 IOPS | `disk_write_ops` | gopsutil `disk.IOCounters()` | 每秒磁盘写入操作数 |
+| 系统负载 (1分钟) | `load_avg_1` | gopsutil `load.Avg()` | 1 分钟平均负载（Linux 特有） |
+| 系统负载 (5分钟) | `load_avg_5` | gopsutil `load.Avg()` | 5 分钟平均负载（Linux 特有） |
+| 系统负载 (15分钟) | `load_avg_15` | gopsutil `load.Avg()` | 15 分钟平均负载（Linux 特有） |
+| 进程总数 | `process_count` | gopsutil `process.Processes()` | 系统中运行的进程总数 |
+| 线程总数 | `thread_count` | 计算值 | 系统中所有进程的线程数之和 |
 
 ### 进程级指标
 
@@ -201,9 +206,10 @@ GOOS=linux go build -o monitor-web ./cmd/web
 | 物理内存 | 内存 | `rss_bytes` | gopsutil `proc.MemoryInfo().RSS` | 常驻内存集大小 |
 | 内存增长速率 | 内存增速 | `rss_growth_rate` | 计算值 | RSS 每秒变化量 (B/s)，正值=增长，负值=释放 |
 | 虚拟内存 | 虚拟内存 | `vms` | gopsutil `proc.MemoryInfo().VMS` | 虚拟内存大小 |
-| 页面缓冲池 | 页面池 | `paged_pool` | 平台特定 | 可换出到磁盘的内存 |
-| 非页面缓冲池 | 非页面池 | `non_paged_pool` | 平台特定 | 必须常驻物理内存的数据 |
 | 句柄数 | 句柄 | `num_fds` | 平台特定 | 打开的文件/资源句柄数 |
+| 线程数 | 线程 | `num_threads` | gopsutil `proc.NumThreads()` | 进程的线程数 |
+| 优先级 | 优先级 | `priority` | 平台特定 | 进程调度优先级 |
+| Nice 值 | - | `nice` | gopsutil `proc.Nice()` | 进程 nice 值（Linux 特有） |
 | 磁盘读取速率 | 磁盘读 | `disk_read_rate` | gopsutil `proc.IOCounters()` | 每秒读取字节数 |
 | 磁盘写入速率 | 磁盘写 | `disk_write_rate` | gopsutil `proc.IOCounters()` | 每秒写入字节数 |
 | 网络接收速率 | 网络收 | `net_recv_rate` | gopacket 抓包 + 端口映射 | 进程每秒接收字节数 |
@@ -242,9 +248,9 @@ GOOS=linux go build -o monitor-web ./cmd/web
 | 指标 | Windows | Linux |
 |------|---------|-------|
 | CPU IO等待 | 不支持（返回 0） | 支持 |
+| 系统负载 | 不支持（返回 0） | 支持 |
 | 句柄数 | `GetProcessHandleCount` Win32 API | `/proc/[pid]/fd` 目录计数 |
-| 页面缓冲池 | `PROCESS_MEMORY_COUNTERS_EX.QuotaPagedPoolUsage` | `memInfo.Swap` 近似 |
-| 非页面缓冲池 | `PROCESS_MEMORY_COUNTERS_EX.QuotaNonPagedPoolUsage` | `memInfo.Data` 近似 |
+| 优先级 | `GetPriorityClass` Win32 API（返回 4-24） | gopsutil `proc.Nice()`（返回 nice 值） |
 | 网络抓包 | 需要 Npcap | 需要 libpcap-dev |
 
 ### 数据采集频率

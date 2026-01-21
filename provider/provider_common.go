@@ -7,7 +7,9 @@ import (
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
+	psnet "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 	"monitor-agent/netmon"
 	"monitor-agent/types"
@@ -81,7 +83,7 @@ type commonProvider struct {
 	matchProcessName func(procName, targetName string) bool
 	formatCmdline    func(exe string) string
 	getHandleCount   func(pid int32) int32
-	getMemoryPools   func(pid int32) (pagedPool, nonPagedPool uint64)
+	getPriority      func(pid int32) int32
 }
 
 // newCommonProvider 创建通用 provider
@@ -89,7 +91,7 @@ func newCommonProvider(
 	matchName func(procName, targetName string) bool,
 	fmtCmdline func(exe string) string,
 	getHandles func(pid int32) int32,
-	getMemPools func(pid int32) (uint64, uint64),
+	getPrio func(pid int32) int32,
 ) *commonProvider {
 	p := &commonProvider{
 		ioSamples:        make(map[int32]*ioSample),
@@ -98,7 +100,7 @@ func newCommonProvider(
 		matchProcessName: matchName,
 		formatCmdline:    fmtCmdline,
 		getHandleCount:   getHandles,
-		getMemoryPools:   getMemPools,
+		getPriority:      getPrio,
 		netMonitor:       netmon.New(),
 	}
 	go p.sampleSystemMetrics()
@@ -329,6 +331,9 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		return nil, err
 	}
 
+	// 获取所有网络连接，用于统计每个进程的监听端口
+	listenPorts := p.getProcessListenPorts()
+
 	alivePids := make(map[int32]bool)
 	var result []types.ProcessInfo
 
@@ -352,6 +357,23 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			numFDs, _ = proc.NumFDs()
 		}
 
+		// 获取线程数
+		numThreads, _ := proc.NumThreads()
+
+		// 获取优先级和 Nice 值
+		var priority int32
+		var nice int32
+		if p.getPriority != nil {
+			priority = p.getPriority(proc.Pid)
+		} else {
+			niceVal, err := proc.Nice()
+			if err == nil {
+				nice = niceVal
+				// Linux: 将 nice 值转换为优先级 (20 - nice)
+				priority = 20 - niceVal
+			}
+		}
+
 		// 如果 cmdline 为空，尝试获取可执行文件路径
 		if cmdline == "" {
 			if exe, err := proc.Exe(); err == nil && exe != "" {
@@ -367,21 +389,6 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		statusStr := ""
 		if len(status) > 0 {
 			statusStr = status[0]
-		}
-
-		// 获取内存池信息
-		var pagedPool, nonPagedPool uint64
-		if p.getMemoryPools != nil {
-			pagedPool, nonPagedPool = p.getMemoryPools(proc.Pid)
-		} else if memInfo != nil {
-			nonPagedPool = memInfo.Data
-			if nonPagedPool == 0 {
-				nonPagedPool = memInfo.RSS / 10
-			}
-			pagedPool = memInfo.Swap
-			if pagedPool == 0 && memInfo.VMS > memInfo.RSS {
-				pagedPool = (memInfo.VMS - memInfo.RSS) / 10
-			}
 		}
 
 		// 计算磁盘 IO 速率
@@ -412,6 +419,15 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			netSendRate = netStats.SendRate
 		}
 
+		// 获取进程打开的文件数（使用 NumFDs 作为代理）
+		openFiles := int(numFDs)
+
+		// 获取进程监听的端口
+		var ports []int
+		if p, ok := listenPorts[proc.Pid]; ok {
+			ports = p
+		}
+
 		result = append(result, types.ProcessInfo{
 			PID:           proc.Pid,
 			Name:          name,
@@ -419,11 +435,12 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			RSSBytes:      rss,
 			RSSGrowthRate: rssGrowthRate,
 			VMS:           vms,
-			PagedPool:     pagedPool,
-			NonPagedPool:  nonPagedPool,
 			Status:        statusStr,
 			Username:      username,
 			NumFDs:        numFDs,
+			NumThreads:    numThreads,
+			Priority:      priority,
+			Nice:          nice,
 			DiskIO:        diskIO,
 			DiskReadRate:  diskReadRate,
 			DiskWriteRate: diskWriteRate,
@@ -433,6 +450,8 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			NetSendRate:   netSendRate,
 			Uptime:        uptime,
 			Cmdline:       cmdline,
+			OpenFiles:     openFiles,
+			ListenPorts:   ports,
 		})
 	}
 
@@ -456,10 +475,37 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 	return result, nil
 }
 
+// getProcessListenPorts 获取所有进程的监听端口
+func (p *commonProvider) getProcessListenPorts() map[int32][]int {
+	result := make(map[int32][]int)
+
+	conns, err := psnet.Connections("all")
+	if err != nil {
+		return result
+	}
+
+	for _, conn := range conns {
+		if conn.Status == "LISTEN" && conn.Pid != 0 {
+			port := int(conn.Laddr.Port)
+			result[conn.Pid] = append(result[conn.Pid], port)
+		}
+	}
+
+	return result
+}
+
 func (p *commonProvider) GetSystemMetrics() (*types.SystemMetrics, error) {
 	// 内存指标
 	memInfo, _ := mem.VirtualMemory()
 	swapInfo, _ := mem.SwapMemory()
+
+	// 系统负载 (Linux)
+	var loadAvg1, loadAvg5, loadAvg15 float64
+	if loadStat, err := load.Avg(); err == nil && loadStat != nil {
+		loadAvg1 = loadStat.Load1
+		loadAvg5 = loadStat.Load5
+		loadAvg15 = loadStat.Load15
+	}
 
 	// 获取缓存的系统采样
 	p.sysSampleMu.RLock()
@@ -503,6 +549,11 @@ func (p *commonProvider) GetSystemMetrics() (*types.SystemMetrics, error) {
 		CPUSystem:  cpuSystem,
 		CPUIowait:  cpuIowait,
 		CPUIdle:    cpuIdle,
+
+		// 负载 (Linux)
+		LoadAvg1:  loadAvg1,
+		LoadAvg5:  loadAvg5,
+		LoadAvg15: loadAvg15,
 
 		// 内存
 		MemoryTotal:     memInfo.Total,

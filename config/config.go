@@ -14,6 +14,7 @@ type Config struct {
 	Logging  LoggingConfig         `json:"logging"`
 	Targets  []types.MonitorTarget `json:"targets"`
 	Sampling SamplingConfig        `json:"sampling"`
+	Impact   types.ImpactConfig    `json:"impact"` // 影响分析配置
 }
 
 // ServerConfig HTTP 服务配置
@@ -58,6 +59,18 @@ func DefaultConfig() *Config {
 			MetricsBufferLen: 300,
 			EventsBufferLen:  100,
 		},
+		Impact: types.ImpactConfig{
+			Enabled:           true,
+			AnalysisInterval:  5,
+			CPUThreshold:      80,
+			MemoryThreshold:   85,
+			DiskIOThreshold:   100,
+			NetworkThreshold:  100,
+			TopNProcesses:     10,
+			HistoryLen:        100,
+			FileCheckInterval: 30,
+			PortCheckInterval: 30,
+		},
 	}
 }
 
@@ -100,14 +113,17 @@ func GenerateExampleConfig(path string) error {
 	cfg := DefaultConfig()
 	cfg.Targets = []types.MonitorTarget{
 		{
-			PID:   0,
-			Name:  "nginx",
-			Alias: "Web服务器",
+			PID:        0,
+			Name:       "nginx",
+			Alias:      "Web服务器",
+			WatchPorts: []int{80, 443},
 		},
 		{
-			PID:   0,
-			Name:  "mysql",
-			Alias: "数据库服务",
+			PID:        0,
+			Name:       "mysql",
+			Alias:      "数据库服务",
+			WatchPorts: []int{3306},
+			WatchFiles: []string{"/etc/mysql/my.cnf"},
 		},
 	}
 
