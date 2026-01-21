@@ -150,14 +150,38 @@ type ImpactMetrics struct {
 
 // ImpactConfig 影响分析配置
 type ImpactConfig struct {
-	Enabled           bool    `json:"enabled"`              // 是否启用
-	AnalysisInterval  int     `json:"analysis_interval"`    // 分析间隔（秒），默认5
-	CPUThreshold      float64 `json:"cpu_threshold"`        // CPU 竞争阈值（%），默认80
-	MemoryThreshold   float64 `json:"memory_threshold"`     // 内存压力阈值（%），默认85
-	DiskIOThreshold   float64 `json:"disk_io_threshold"`    // 磁盘IO阈值（MB/s），默认100
-	NetworkThreshold  float64 `json:"network_threshold"`    // 网络IO阈值（MB/s），默认100
-	TopNProcesses     int     `json:"top_n_processes"`      // 分析 Top N 进程，默认10
-	HistoryLen        int     `json:"history_len"`          // 影响记录保留数量，默认100
-	FileCheckInterval int     `json:"file_check_interval"`  // 文件检测间隔（秒），默认30
-	PortCheckInterval int     `json:"port_check_interval"`  // 端口检测间隔（秒），默认30
+	Enabled          bool    `json:"enabled"`           // 是否启用
+	AnalysisInterval int     `json:"analysis_interval"` // 分析间隔（秒），默认5
+	TopNProcesses    int     `json:"top_n_processes"`   // 分析 Top N 进程，默认10
+	HistoryLen       int     `json:"history_len"`       // 影响记录保留数量，默认100
+
+	// 系统级别阈值
+	CPUThreshold     float64 `json:"cpu_threshold"`      // 系统 CPU 竞争阈值（%），默认80
+	MemoryThreshold  float64 `json:"memory_threshold"`   // 系统内存压力阈值（%），默认85
+	DiskIOThreshold  float64 `json:"disk_io_threshold"`  // 系统磁盘IO阈值（MB/s），默认100
+	NetworkThreshold float64 `json:"network_threshold"` // 系统网络IO阈值（MB/s），默认100
+
+	// 进程级别阈值（单个进程超过即触发检测）
+	// 0 表示不检测该指标
+	ProcCPUThreshold        float64 `json:"proc_cpu_threshold"`         // 进程 CPU 阈值（%），默认50
+	ProcMemoryThreshold     float64 `json:"proc_memory_threshold"`      // 进程内存阈值（MB），默认1000
+	ProcMemGrowthThreshold  float64 `json:"proc_mem_growth_threshold"`  // 进程内存增速阈值（MB/s），默认10
+	ProcVMSThreshold        float64 `json:"proc_vms_threshold"`         // 进程虚拟内存阈值（MB），默认0（不检测）
+	ProcFDsThreshold        int     `json:"proc_fds_threshold"`         // 进程句柄数阈值，默认1000
+	ProcThreadsThreshold    int     `json:"proc_threads_threshold"`     // 进程线程数阈值，默认500
+	ProcOpenFilesThreshold  int     `json:"proc_open_files_threshold"`  // 进程打开文件数阈值，默认500
+	ProcDiskReadThreshold   float64 `json:"proc_disk_read_threshold"`   // 进程磁盘读阈值（MB/s），默认50
+	ProcDiskWriteThreshold  float64 `json:"proc_disk_write_threshold"`  // 进程磁盘写阈值（MB/s），默认50
+	ProcNetRecvThreshold    float64 `json:"proc_net_recv_threshold"`    // 进程网络收阈值（MB/s），默认50
+	ProcNetSendThreshold    float64 `json:"proc_net_send_threshold"`    // 进程网络发阈值（MB/s），默认50
+
+	// 资源冲突检测间隔
+	FileCheckInterval int `json:"file_check_interval"` // 文件检测间隔（秒），默认30
+	PortCheckInterval int `json:"port_check_interval"` // 端口检测间隔（秒），默认30
+
+	// 兼容旧字段（已废弃，使用新字段）
+	ProcessCPUThreshold     float64 `json:"process_cpu_threshold,omitempty"`
+	ProcessMemoryThreshold  float64 `json:"process_memory_threshold,omitempty"`
+	ProcessDiskIOThreshold  float64 `json:"process_disk_io_threshold,omitempty"`
+	ProcessNetworkThreshold float64 `json:"process_network_threshold,omitempty"`
 }

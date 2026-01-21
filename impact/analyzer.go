@@ -90,6 +90,55 @@ func NewImpactAnalyzer(
 	if cfg.PortCheckInterval <= 0 {
 		cfg.PortCheckInterval = 30
 	}
+	// 进程级别阈值默认值
+	// 兼容旧字段
+	if cfg.ProcessCPUThreshold > 0 && cfg.ProcCPUThreshold <= 0 {
+		cfg.ProcCPUThreshold = cfg.ProcessCPUThreshold
+	}
+	if cfg.ProcessMemoryThreshold > 0 && cfg.ProcMemoryThreshold <= 0 {
+		cfg.ProcMemoryThreshold = cfg.ProcessMemoryThreshold
+	}
+	if cfg.ProcessDiskIOThreshold > 0 && (cfg.ProcDiskReadThreshold <= 0 && cfg.ProcDiskWriteThreshold <= 0) {
+		cfg.ProcDiskReadThreshold = cfg.ProcessDiskIOThreshold
+		cfg.ProcDiskWriteThreshold = cfg.ProcessDiskIOThreshold
+	}
+	if cfg.ProcessNetworkThreshold > 0 && (cfg.ProcNetRecvThreshold <= 0 && cfg.ProcNetSendThreshold <= 0) {
+		cfg.ProcNetRecvThreshold = cfg.ProcessNetworkThreshold
+		cfg.ProcNetSendThreshold = cfg.ProcessNetworkThreshold
+	}
+
+	// 设置新字段默认值
+	if cfg.ProcCPUThreshold <= 0 {
+		cfg.ProcCPUThreshold = 50 // 单进程 CPU > 50%
+	}
+	if cfg.ProcMemoryThreshold <= 0 {
+		cfg.ProcMemoryThreshold = 1000 // 单进程内存 > 1GB
+	}
+	if cfg.ProcMemGrowthThreshold <= 0 {
+		cfg.ProcMemGrowthThreshold = 10 // 单进程内存增速 > 10MB/s
+	}
+	// ProcVMSThreshold 默认 0，不检测
+	if cfg.ProcFDsThreshold <= 0 {
+		cfg.ProcFDsThreshold = 1000 // 单进程句柄数 > 1000
+	}
+	if cfg.ProcThreadsThreshold <= 0 {
+		cfg.ProcThreadsThreshold = 500 // 单进程线程数 > 500
+	}
+	if cfg.ProcOpenFilesThreshold <= 0 {
+		cfg.ProcOpenFilesThreshold = 500 // 单进程打开文件数 > 500
+	}
+	if cfg.ProcDiskReadThreshold <= 0 {
+		cfg.ProcDiskReadThreshold = 50 // 单进程磁盘读 > 50MB/s
+	}
+	if cfg.ProcDiskWriteThreshold <= 0 {
+		cfg.ProcDiskWriteThreshold = 50 // 单进程磁盘写 > 50MB/s
+	}
+	if cfg.ProcNetRecvThreshold <= 0 {
+		cfg.ProcNetRecvThreshold = 50 // 单进程网络收 > 50MB/s
+	}
+	if cfg.ProcNetSendThreshold <= 0 {
+		cfg.ProcNetSendThreshold = 50 // 单进程网络发 > 50MB/s
+	}
 
 	return &ImpactAnalyzer{
 		provider:      prov,
@@ -170,9 +219,21 @@ func (a *ImpactAnalyzer) UpdateConfig(cfg types.ImpactConfig) {
 	if cfg.PortCheckInterval > 0 {
 		a.config.PortCheckInterval = cfg.PortCheckInterval
 	}
+	// 进程级别阈值（支持设为0以禁用检测）
+	a.config.ProcCPUThreshold = cfg.ProcCPUThreshold
+	a.config.ProcMemoryThreshold = cfg.ProcMemoryThreshold
+	a.config.ProcMemGrowthThreshold = cfg.ProcMemGrowthThreshold
+	a.config.ProcVMSThreshold = cfg.ProcVMSThreshold
+	a.config.ProcFDsThreshold = cfg.ProcFDsThreshold
+	a.config.ProcThreadsThreshold = cfg.ProcThreadsThreshold
+	a.config.ProcOpenFilesThreshold = cfg.ProcOpenFilesThreshold
+	a.config.ProcDiskReadThreshold = cfg.ProcDiskReadThreshold
+	a.config.ProcDiskWriteThreshold = cfg.ProcDiskWriteThreshold
+	a.config.ProcNetRecvThreshold = cfg.ProcNetRecvThreshold
+	a.config.ProcNetSendThreshold = cfg.ProcNetSendThreshold
 	
-	log.Printf("[INFO] ImpactAnalyzer config updated: CPU=%.0f%%, Memory=%.0f%%, DiskIO=%.0fMB/s, Network=%.0fMB/s",
-		a.config.CPUThreshold, a.config.MemoryThreshold, a.config.DiskIOThreshold, a.config.NetworkThreshold)
+	log.Printf("[INFO] ImpactAnalyzer config updated: SysCPU=%.0f%%, SysMem=%.0f%%, ProcCPU=%.0f%%, ProcMem=%.0fMB",
+		a.config.CPUThreshold, a.config.MemoryThreshold, a.config.ProcCPUThreshold, a.config.ProcMemoryThreshold)
 }
 
 // GetConfig 获取当前配置
@@ -309,6 +370,7 @@ func (a *ImpactAnalyzer) analyze() {
 	a.analyzeMemory(sysMetrics, processes, targets, procMap, targetPIDSet)
 	a.analyzeDiskIO(sysMetrics, processes, targets, procMap, targetPIDSet)
 	a.analyzeNetwork(sysMetrics, processes, targets, procMap, targetPIDSet)
+	a.analyzeOtherMetrics(sysMetrics, processes, targets, procMap, targetPIDSet)
 
 	// 低频检测：文件和端口冲突（动态维护）
 	now := time.Now()
@@ -360,9 +422,8 @@ func (a *ImpactAnalyzer) analyzeCPU(
 	// 先清除旧的 CPU 事件
 	a.clearEventsByType("cpu")
 
-	if sys.CPUPercent < a.config.CPUThreshold {
-		return
-	}
+	// 检查是否触发系统级别阈值
+	systemTriggered := sys.CPUPercent >= a.config.CPUThreshold
 
 	// 获取 Top N CPU 消耗进程
 	topCPU := a.getTopByField(procs, "cpu", a.config.TopNProcesses)
@@ -380,12 +441,32 @@ func (a *ImpactAnalyzer) analyzeCPU(
 				continue
 			}
 
-			// 只关注 CPU > 10% 的进程
-			if proc.CPUPct < 10 {
+			// 检查是否触发进程级别阈值
+			processTriggered := a.config.ProcCPUThreshold > 0 && proc.CPUPct >= a.config.ProcCPUThreshold
+
+			// 如果系统级别和进程级别都未触发，跳过
+			if !systemTriggered && !processTriggered {
 				continue
 			}
 
-			severity := a.getSeverity(sys.CPUPercent, 80, 90, 95)
+			// 如果是系统级别触发，还需要进程 CPU > 10%
+			if systemTriggered && !processTriggered && proc.CPUPct < 10 {
+				continue
+			}
+
+			// 计算严重程度
+			var severity string
+			var description string
+			if processTriggered {
+				// 进程级别触发
+				severity = a.getProcessSeverity(proc.CPUPct, a.config.ProcCPUThreshold)
+				description = fmt.Sprintf("进程 %s (PID %d) CPU 占用 %.1f%% 超过阈值 %.0f%%", proc.Name, proc.PID, proc.CPUPct, a.config.ProcCPUThreshold)
+			} else {
+				// 系统级别触发
+				severity = a.getSeverity(sys.CPUPercent, 80, 90, 95)
+				description = fmt.Sprintf("系统 CPU %.1f%% 超过阈值，进程 %s (PID %d) 占用 %.1f%%", sys.CPUPercent, proc.Name, proc.PID, proc.CPUPct)
+			}
+
 			event := types.ImpactEvent{
 				Timestamp:   time.Now(),
 				TargetPID:   target.PID,
@@ -394,7 +475,7 @@ func (a *ImpactAnalyzer) analyzeCPU(
 				Severity:    severity,
 				SourcePID:   proc.PID,
 				SourceName:  proc.Name,
-				Description: fmt.Sprintf("系统 CPU 使用率 %.1f%%，进程 %s (PID %d) 占用 %.1f%%", sys.CPUPercent, proc.Name, proc.PID, proc.CPUPct),
+				Description: description,
 				Metrics: types.ImpactMetrics{
 					SystemCPU:    sys.CPUPercent,
 					SystemMemory: sys.MemoryPercent,
@@ -421,9 +502,10 @@ func (a *ImpactAnalyzer) analyzeMemory(
 	// 先清除旧的 memory 事件
 	a.clearEventsByType("memory")
 
-	if sys.MemoryPercent < a.config.MemoryThreshold {
-		return
-	}
+	// 检查是否触发系统级别阈值
+	systemTriggered := sys.MemoryPercent >= a.config.MemoryThreshold
+	// 进程内存阈值转换为字节
+	procMemThreshold := a.config.ProcMemoryThreshold * 1024 * 1024
 
 	// 获取 Top N 内存消耗进程
 	topMem := a.getTopByField(procs, "memory", a.config.TopNProcesses)
@@ -439,12 +521,32 @@ func (a *ImpactAnalyzer) analyzeMemory(
 				continue
 			}
 
-			// 只关注内存 > 100MB 的进程
-			if proc.RSSBytes < 100*1024*1024 {
+			// 检查是否触发进程级别阈值
+			processTriggered := a.config.ProcMemoryThreshold > 0 && float64(proc.RSSBytes) >= procMemThreshold
+
+			// 如果系统级别和进程级别都未触发，跳过
+			if !systemTriggered && !processTriggered {
 				continue
 			}
 
-			severity := a.getSeverity(sys.MemoryPercent, 85, 92, 98)
+			// 如果是系统级别触发，还需要进程内存 > 100MB
+			if systemTriggered && !processTriggered && proc.RSSBytes < 100*1024*1024 {
+				continue
+			}
+
+			// 计算严重程度
+			var severity string
+			var description string
+			if processTriggered {
+				// 进程级别触发
+				severity = a.getProcessSeverity(float64(proc.RSSBytes), procMemThreshold)
+				description = fmt.Sprintf("进程 %s (PID %d) 内存占用 %s 超过阈值 %.0f MB", proc.Name, proc.PID, formatBytes(proc.RSSBytes), a.config.ProcMemoryThreshold)
+			} else {
+				// 系统级别触发
+				severity = a.getSeverity(sys.MemoryPercent, 85, 92, 98)
+				description = fmt.Sprintf("系统内存 %.1f%% 超过阈值，进程 %s (PID %d) 占用 %s", sys.MemoryPercent, proc.Name, proc.PID, formatBytes(proc.RSSBytes))
+			}
+
 			event := types.ImpactEvent{
 				Timestamp:   time.Now(),
 				TargetPID:   target.PID,
@@ -453,7 +555,7 @@ func (a *ImpactAnalyzer) analyzeMemory(
 				Severity:    severity,
 				SourcePID:   proc.PID,
 				SourceName:  proc.Name,
-				Description: fmt.Sprintf("系统内存使用率 %.1f%%，进程 %s (PID %d) 占用 %s", sys.MemoryPercent, proc.Name, proc.PID, formatBytes(proc.RSSBytes)),
+				Description: description,
 				Metrics: types.ImpactMetrics{
 					SystemCPU:    sys.CPUPercent,
 					SystemMemory: sys.MemoryPercent,
@@ -480,13 +582,14 @@ func (a *ImpactAnalyzer) analyzeDiskIO(
 	// 先清除旧的 disk_io 事件
 	a.clearEventsByType("disk_io")
 
-	// 阈值转换为 B/s
-	threshold := a.config.DiskIOThreshold * 1024 * 1024
+	// 系统阈值转换为 B/s
+	systemThreshold := a.config.DiskIOThreshold * 1024 * 1024
 	totalIO := sys.DiskReadRate + sys.DiskWriteRate
+	systemTriggered := totalIO >= systemThreshold
 
-	if totalIO < threshold {
-		return
-	}
+	// 进程阈值转换为 B/s
+	procDiskReadThreshold := a.config.ProcDiskReadThreshold * 1024 * 1024
+	procDiskWriteThreshold := a.config.ProcDiskWriteThreshold * 1024 * 1024
 
 	// 获取 Top N 磁盘 IO 进程
 	topIO := a.getTopByField(procs, "disk_io", a.config.TopNProcesses)
@@ -502,13 +605,41 @@ func (a *ImpactAnalyzer) analyzeDiskIO(
 				continue
 			}
 
+			// 检查是否触发进程级别阈值（读或写）
+			readTriggered := a.config.ProcDiskReadThreshold > 0 && proc.DiskReadRate >= procDiskReadThreshold
+			writeTriggered := a.config.ProcDiskWriteThreshold > 0 && proc.DiskWriteRate >= procDiskWriteThreshold
+			processTriggered := readTriggered || writeTriggered
+
 			procIO := proc.DiskReadRate + proc.DiskWriteRate
-			// 只关注 IO > 10MB/s 的进程
-			if procIO < 10*1024*1024 {
+
+			// 如果系统级别和进程级别都未触发，跳过
+			if !systemTriggered && !processTriggered {
 				continue
 			}
 
-			severity := a.getSeverity(totalIO/1024/1024, 100, 200, 500)
+			// 如果是系统级别触发，还需要进程 IO > 10MB/s
+			if systemTriggered && !processTriggered && procIO < 10*1024*1024 {
+				continue
+			}
+
+			// 计算严重程度
+			var severity string
+			var description string
+			if processTriggered {
+				// 进程级别触发
+				if readTriggered {
+					severity = a.getProcessSeverity(proc.DiskReadRate, procDiskReadThreshold)
+					description = fmt.Sprintf("进程 %s (PID %d) 磁盘读 %.1f MB/s 超过阈值 %.0f MB/s", proc.Name, proc.PID, proc.DiskReadRate/1024/1024, a.config.ProcDiskReadThreshold)
+				} else {
+					severity = a.getProcessSeverity(proc.DiskWriteRate, procDiskWriteThreshold)
+					description = fmt.Sprintf("进程 %s (PID %d) 磁盘写 %.1f MB/s 超过阈值 %.0f MB/s", proc.Name, proc.PID, proc.DiskWriteRate/1024/1024, a.config.ProcDiskWriteThreshold)
+				}
+			} else {
+				// 系统级别触发
+				severity = a.getSeverity(totalIO/1024/1024, 100, 200, 500)
+				description = fmt.Sprintf("系统磁盘 IO %.1f MB/s 超过阈值，进程 %s (PID %d) IO 速率 %.1f MB/s", totalIO/1024/1024, proc.Name, proc.PID, procIO/1024/1024)
+			}
+
 			event := types.ImpactEvent{
 				Timestamp:   time.Now(),
 				TargetPID:   target.PID,
@@ -517,7 +648,7 @@ func (a *ImpactAnalyzer) analyzeDiskIO(
 				Severity:    severity,
 				SourcePID:   proc.PID,
 				SourceName:  proc.Name,
-				Description: fmt.Sprintf("系统磁盘 IO %.1f MB/s，进程 %s (PID %d) IO 速率 %.1f MB/s", totalIO/1024/1024, proc.Name, proc.PID, procIO/1024/1024),
+				Description: description,
 				Metrics: types.ImpactMetrics{
 					SystemCPU:    sys.CPUPercent,
 					SystemMemory: sys.MemoryPercent,
@@ -545,13 +676,14 @@ func (a *ImpactAnalyzer) analyzeNetwork(
 	// 先清除旧的 network 事件
 	a.clearEventsByType("network")
 
-	// 阈值转换为 B/s
-	threshold := a.config.NetworkThreshold * 1024 * 1024
+	// 系统阈值转换为 B/s
+	systemThreshold := a.config.NetworkThreshold * 1024 * 1024
 	totalNet := sys.NetRecvRate + sys.NetSendRate
+	systemTriggered := totalNet >= systemThreshold
 
-	if totalNet < threshold {
-		return
-	}
+	// 进程阈值转换为 B/s
+	procNetRecvThreshold := a.config.ProcNetRecvThreshold * 1024 * 1024
+	procNetSendThreshold := a.config.ProcNetSendThreshold * 1024 * 1024
 
 	// 获取 Top N 网络流量进程
 	topNet := a.getTopByField(procs, "network", a.config.TopNProcesses)
@@ -567,10 +699,39 @@ func (a *ImpactAnalyzer) analyzeNetwork(
 				continue
 			}
 
+			// 检查是否触发进程级别阈值（收或发）
+			recvTriggered := a.config.ProcNetRecvThreshold > 0 && proc.NetRecvRate >= procNetRecvThreshold
+			sendTriggered := a.config.ProcNetSendThreshold > 0 && proc.NetSendRate >= procNetSendThreshold
+			processTriggered := recvTriggered || sendTriggered
+
 			procNet := proc.NetRecvRate + proc.NetSendRate
-			// 只关注网络 > 10MB/s 的进程
-			if procNet < 10*1024*1024 {
+
+			// 如果系统级别和进程级别都未触发，跳过
+			if !systemTriggered && !processTriggered {
 				continue
+			}
+
+			// 如果是系统级别触发，还需要进程网络 > 10MB/s
+			if systemTriggered && !processTriggered && procNet < 10*1024*1024 {
+				continue
+			}
+
+			// 计算严重程度
+			var severity string
+			var description string
+			if processTriggered {
+				// 进程级别触发
+				if recvTriggered {
+					severity = a.getProcessSeverity(proc.NetRecvRate, procNetRecvThreshold)
+					description = fmt.Sprintf("进程 %s (PID %d) 网络收 %.1f MB/s 超过阈值 %.0f MB/s", proc.Name, proc.PID, proc.NetRecvRate/1024/1024, a.config.ProcNetRecvThreshold)
+				} else {
+					severity = a.getProcessSeverity(proc.NetSendRate, procNetSendThreshold)
+					description = fmt.Sprintf("进程 %s (PID %d) 网络发 %.1f MB/s 超过阈值 %.0f MB/s", proc.Name, proc.PID, proc.NetSendRate/1024/1024, a.config.ProcNetSendThreshold)
+				}
+			} else {
+				// 系统级别触发
+				severity = "medium"
+				description = fmt.Sprintf("系统网络流量 %.1f MB/s 超过阈值，进程 %s (PID %d) 流量 %.1f MB/s", totalNet/1024/1024, proc.Name, proc.PID, procNet/1024/1024)
 			}
 
 			event := types.ImpactEvent{
@@ -578,10 +739,10 @@ func (a *ImpactAnalyzer) analyzeNetwork(
 				TargetPID:   target.PID,
 				TargetName:  a.getTargetDisplayName(target),
 				ImpactType:  "network",
-				Severity:    "medium",
+				Severity:    severity,
 				SourcePID:   proc.PID,
 				SourceName:  proc.Name,
-				Description: fmt.Sprintf("系统网络流量 %.1f MB/s，进程 %s (PID %d) 流量 %.1f MB/s", totalNet/1024/1024, proc.Name, proc.PID, procNet/1024/1024),
+				Description: description,
 				Metrics: types.ImpactMetrics{
 					SystemCPU:    sys.CPUPercent,
 					SystemMemory: sys.MemoryPercent,
@@ -961,6 +1122,8 @@ func (a *ImpactAnalyzer) getImpactTypeName(impactType string) string {
 		return "CPU竞争"
 	case "memory":
 		return "内存压力"
+	case "mem_growth":
+		return "内存增速"
 	case "disk_io":
 		return "磁盘IO"
 	case "network":
@@ -969,6 +1132,14 @@ func (a *ImpactAnalyzer) getImpactTypeName(impactType string) string {
 		return "文件占用"
 	case "port":
 		return "端口占用"
+	case "fds":
+		return "句柄数"
+	case "threads":
+		return "线程数"
+	case "open_files":
+		return "打开文件数"
+	case "vms":
+		return "虚拟内存"
 	default:
 		return impactType
 	}
@@ -992,6 +1163,18 @@ func (a *ImpactAnalyzer) getSeverity(value float64, low, medium, high float64) s
 		return "medium"
 	}
 	return "low"
+}
+
+// getProcessSeverity 根据进程指标超过阈值的程度计算严重性
+func (a *ImpactAnalyzer) getProcessSeverity(value, threshold float64) string {
+	ratio := value / threshold
+	if ratio >= 2.0 {
+		return "critical"
+	}
+	if ratio >= 1.5 {
+		return "high"
+	}
+	return "medium"
 }
 
 func (a *ImpactAnalyzer) getCPUSuggestion(severity, procName string, cpuPct float64) string {
@@ -1055,4 +1238,145 @@ func formatBytes(bytes uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// analyzeOtherMetrics 分析其他进程指标（内存增速、句柄数、线程数、打开文件数、虚拟内存）
+func (a *ImpactAnalyzer) analyzeOtherMetrics(
+	sys *types.SystemMetrics,
+	procs []types.ProcessInfo,
+	targets []types.MonitorTarget,
+	procMap map[int32]*types.ProcessInfo,
+	targetPIDSet map[int32]bool,
+) {
+	// 清除旧的其他类型事件
+	a.clearEventsByType("mem_growth")
+	a.clearEventsByType("fds")
+	a.clearEventsByType("threads")
+	a.clearEventsByType("open_files")
+	a.clearEventsByType("vms")
+
+	// 阈值转换
+	memGrowthThreshold := a.config.ProcMemGrowthThreshold * 1024 * 1024 // MB/s -> B/s
+	vmsThreshold := a.config.ProcVMSThreshold * 1024 * 1024             // MB -> B
+
+	for _, target := range targets {
+		targetProc := procMap[target.PID]
+		if targetProc == nil {
+			continue
+		}
+
+		for _, proc := range procs {
+			// 跳过目标自身
+			if targetPIDSet[proc.PID] {
+				continue
+			}
+
+			// 检查内存增速
+			if a.config.ProcMemGrowthThreshold > 0 && proc.RSSGrowthRate >= memGrowthThreshold {
+				severity := a.getProcessSeverity(proc.RSSGrowthRate, memGrowthThreshold)
+				event := types.ImpactEvent{
+					Timestamp:   time.Now(),
+					TargetPID:   target.PID,
+					TargetName:  a.getTargetDisplayName(target),
+					ImpactType:  "mem_growth",
+					Severity:    severity,
+					SourcePID:   proc.PID,
+					SourceName:  proc.Name,
+					Description: fmt.Sprintf("进程 %s (PID %d) 内存增速 %.1f MB/s 超过阈值 %.0f MB/s", proc.Name, proc.PID, proc.RSSGrowthRate/1024/1024, a.config.ProcMemGrowthThreshold),
+					Metrics: types.ImpactMetrics{
+						SystemCPU:    sys.CPUPercent,
+						SystemMemory: sys.MemoryPercent,
+						SourceMemory: proc.RSSBytes,
+					},
+					Suggestion: fmt.Sprintf("进程 %s 内存持续增长，可能存在内存泄漏，建议检查", proc.Name),
+				}
+				a.recordImpact(event, "")
+			}
+
+			// 检查句柄数
+			if a.config.ProcFDsThreshold > 0 && proc.NumFDs >= int32(a.config.ProcFDsThreshold) {
+				severity := a.getProcessSeverity(float64(proc.NumFDs), float64(a.config.ProcFDsThreshold))
+				event := types.ImpactEvent{
+					Timestamp:   time.Now(),
+					TargetPID:   target.PID,
+					TargetName:  a.getTargetDisplayName(target),
+					ImpactType:  "fds",
+					Severity:    severity,
+					SourcePID:   proc.PID,
+					SourceName:  proc.Name,
+					Description: fmt.Sprintf("进程 %s (PID %d) 句柄数 %d 超过阈值 %d", proc.Name, proc.PID, proc.NumFDs, a.config.ProcFDsThreshold),
+					Metrics: types.ImpactMetrics{
+						SystemCPU:    sys.CPUPercent,
+						SystemMemory: sys.MemoryPercent,
+					},
+					Suggestion: fmt.Sprintf("进程 %s 句柄数过高，可能存在资源泄漏，建议检查", proc.Name),
+				}
+				a.recordImpact(event, "")
+			}
+
+			// 检查线程数
+			if a.config.ProcThreadsThreshold > 0 && proc.NumThreads >= int32(a.config.ProcThreadsThreshold) {
+				severity := a.getProcessSeverity(float64(proc.NumThreads), float64(a.config.ProcThreadsThreshold))
+				event := types.ImpactEvent{
+					Timestamp:   time.Now(),
+					TargetPID:   target.PID,
+					TargetName:  a.getTargetDisplayName(target),
+					ImpactType:  "threads",
+					Severity:    severity,
+					SourcePID:   proc.PID,
+					SourceName:  proc.Name,
+					Description: fmt.Sprintf("进程 %s (PID %d) 线程数 %d 超过阈值 %d", proc.Name, proc.PID, proc.NumThreads, a.config.ProcThreadsThreshold),
+					Metrics: types.ImpactMetrics{
+						SystemCPU:    sys.CPUPercent,
+						SystemMemory: sys.MemoryPercent,
+					},
+					Suggestion: fmt.Sprintf("进程 %s 线程数过多，可能影响系统性能，建议检查", proc.Name),
+				}
+				a.recordImpact(event, "")
+			}
+
+			// 检查打开文件数
+			if a.config.ProcOpenFilesThreshold > 0 && proc.OpenFiles >= a.config.ProcOpenFilesThreshold {
+				severity := a.getProcessSeverity(float64(proc.OpenFiles), float64(a.config.ProcOpenFilesThreshold))
+				event := types.ImpactEvent{
+					Timestamp:   time.Now(),
+					TargetPID:   target.PID,
+					TargetName:  a.getTargetDisplayName(target),
+					ImpactType:  "open_files",
+					Severity:    severity,
+					SourcePID:   proc.PID,
+					SourceName:  proc.Name,
+					Description: fmt.Sprintf("进程 %s (PID %d) 打开文件数 %d 超过阈值 %d", proc.Name, proc.PID, proc.OpenFiles, a.config.ProcOpenFilesThreshold),
+					Metrics: types.ImpactMetrics{
+						SystemCPU:    sys.CPUPercent,
+						SystemMemory: sys.MemoryPercent,
+					},
+					Suggestion: fmt.Sprintf("进程 %s 打开文件数过多，可能影响系统性能", proc.Name),
+				}
+				a.recordImpact(event, "")
+			}
+
+			// 检查虚拟内存
+			if a.config.ProcVMSThreshold > 0 && float64(proc.VMS) >= vmsThreshold {
+				severity := a.getProcessSeverity(float64(proc.VMS), vmsThreshold)
+				event := types.ImpactEvent{
+					Timestamp:   time.Now(),
+					TargetPID:   target.PID,
+					TargetName:  a.getTargetDisplayName(target),
+					ImpactType:  "vms",
+					Severity:    severity,
+					SourcePID:   proc.PID,
+					SourceName:  proc.Name,
+					Description: fmt.Sprintf("进程 %s (PID %d) 虚拟内存 %s 超过阈值 %.0f MB", proc.Name, proc.PID, formatBytes(proc.VMS), a.config.ProcVMSThreshold),
+					Metrics: types.ImpactMetrics{
+						SystemCPU:    sys.CPUPercent,
+						SystemMemory: sys.MemoryPercent,
+						SourceMemory: proc.VMS,
+					},
+					Suggestion: fmt.Sprintf("进程 %s 虚拟内存占用过高", proc.Name),
+				}
+				a.recordImpact(event, "")
+			}
+		}
+	}
 }

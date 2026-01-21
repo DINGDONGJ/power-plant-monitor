@@ -189,10 +189,15 @@
         .event-item .type-process_gone { color: #ff8800; }
         .event-item .type-impact_cpu { color: #ff6666; }
         .event-item .type-impact_memory { color: #ffaa00; }
+        .event-item .type-impact_mem_growth { color: #ff8800; }
         .event-item .type-impact_disk_io { color: #00aaff; }
         .event-item .type-impact_network { color: #00ff88; }
         .event-item .type-impact_file { color: #ff66ff; }
         .event-item .type-impact_port { color: #6666ff; }
+        .event-item .type-impact_fds { color: #aa66ff; }
+        .event-item .type-impact_threads { color: #66aaff; }
+        .event-item .type-impact_open_files { color: #ffaa66; }
+        .event-item .type-impact_vms { color: #ff66aa; }
         .event-item .type-impact_resolved { color: #00ff00; }
         
         /* 影响分析样式 */
@@ -242,10 +247,15 @@
         }
         .impact-type.cpu { background: #3a1a1a; color: #ff6666; }
         .impact-type.memory { background: #3a3a1a; color: #ffaa00; }
+        .impact-type.mem_growth { background: #3a2a1a; color: #ff8800; }
         .impact-type.disk_io { background: #1a3a3a; color: #00aaff; }
         .impact-type.network { background: #1a3a1a; color: #00ff88; }
         .impact-type.file { background: #3a1a3a; color: #ff66ff; }
         .impact-type.port { background: #1a1a3a; color: #6666ff; }
+        .impact-type.fds { background: #2a1a3a; color: #aa66ff; }
+        .impact-type.threads { background: #1a2a3a; color: #66aaff; }
+        .impact-type.open_files { background: #3a2a2a; color: #ffaa66; }
+        .impact-type.vms { background: #3a1a2a; color: #ff66aa; }
         .impact-severity {
             font-size: 11px;
             padding: 2px 6px;
@@ -503,27 +513,79 @@
         
         <!-- 影响分析阈值配置弹窗 -->
         <div class="modal-overlay" id="impactConfigModal">
-            <div class="modal" style="min-width:450px">
+            <div class="modal" style="min-width:580px;max-height:90vh;overflow-y:auto">
                 <h3>⚙ 影响分析阈值配置</h3>
-                <div class="modal-row">
-                    <label>CPU 竞争阈值 (%)</label>
-                    <input type="number" id="impactCpuThreshold" min="0" max="100" step="1" placeholder="80">
-                    <span style="color:#666;font-size:11px">系统CPU超过此值时检测竞争</span>
+                <div style="margin-bottom:12px;padding:8px;background:#002200;border-radius:4px">
+                    <div style="color:#0f0;font-size:13px;margin-bottom:4px">📊 系统级别阈值</div>
+                    <div style="color:#666;font-size:11px">当系统整体指标超过阈值时触发检测</div>
                 </div>
-                <div class="modal-row">
-                    <label>内存压力阈值 (%)</label>
-                    <input type="number" id="impactMemThreshold" min="0" max="100" step="1" placeholder="85">
-                    <span style="color:#666;font-size:11px">系统内存超过此值时检测压力</span>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div class="modal-row">
+                        <label>CPU阈值 (%)</label>
+                        <input type="number" id="impactCpuThreshold" min="0" max="100" step="1" placeholder="80">
+                    </div>
+                    <div class="modal-row">
+                        <label>内存阈值 (%)</label>
+                        <input type="number" id="impactMemThreshold" min="0" max="100" step="1" placeholder="85">
+                    </div>
+                    <div class="modal-row">
+                        <label>磁盘IO阈值 (MB/s)</label>
+                        <input type="number" id="impactDiskThreshold" min="0" step="10" placeholder="100">
+                    </div>
+                    <div class="modal-row">
+                        <label>网络阈值 (MB/s)</label>
+                        <input type="number" id="impactNetThreshold" min="0" step="10" placeholder="100">
+                    </div>
                 </div>
-                <div class="modal-row">
-                    <label>磁盘IO阈值 (MB/s)</label>
-                    <input type="number" id="impactDiskThreshold" min="0" step="10" placeholder="100">
-                    <span style="color:#666;font-size:11px">系统磁盘IO超过此值时检测</span>
+                <div style="margin:12px 0;padding:8px;background:#220022;border-radius:4px">
+                    <div style="color:#f0f;font-size:13px;margin-bottom:4px">🔍 进程级别阈值 <span style="color:#888;font-size:11px">(设为0禁用检测)</span></div>
+                    <div style="color:#666;font-size:11px">单个进程超过阈值即触发检测，无论系统整体如何</div>
                 </div>
-                <div class="modal-row">
-                    <label>网络带宽阈值 (MB/s)</label>
-                    <input type="number" id="impactNetThreshold" min="0" step="10" placeholder="100">
-                    <span style="color:#666;font-size:11px">系统网络流量超过此值时检测</span>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div class="modal-row">
+                        <label>CPU (%)</label>
+                        <input type="number" id="impactProcCpuThreshold" min="0" max="100" step="1" placeholder="50">
+                    </div>
+                    <div class="modal-row">
+                        <label>内存 (MB)</label>
+                        <input type="number" id="impactProcMemThreshold" min="0" step="100" placeholder="1000">
+                    </div>
+                    <div class="modal-row">
+                        <label>内存增速 (MB/s)</label>
+                        <input type="number" id="impactProcMemGrowthThreshold" min="0" step="1" placeholder="10">
+                    </div>
+                    <div class="modal-row">
+                        <label>虚拟内存 (MB)</label>
+                        <input type="number" id="impactProcVMSThreshold" min="0" step="100" placeholder="0">
+                    </div>
+                    <div class="modal-row">
+                        <label>句柄数</label>
+                        <input type="number" id="impactProcFDsThreshold" min="0" step="100" placeholder="1000">
+                    </div>
+                    <div class="modal-row">
+                        <label>线程数</label>
+                        <input type="number" id="impactProcThreadsThreshold" min="0" step="50" placeholder="500">
+                    </div>
+                    <div class="modal-row">
+                        <label>打开文件数</label>
+                        <input type="number" id="impactProcOpenFilesThreshold" min="0" step="50" placeholder="500">
+                    </div>
+                    <div class="modal-row">
+                        <label>磁盘读 (MB/s)</label>
+                        <input type="number" id="impactProcDiskReadThreshold" min="0" step="10" placeholder="50">
+                    </div>
+                    <div class="modal-row">
+                        <label>磁盘写 (MB/s)</label>
+                        <input type="number" id="impactProcDiskWriteThreshold" min="0" step="10" placeholder="50">
+                    </div>
+                    <div class="modal-row">
+                        <label>网络收 (MB/s)</label>
+                        <input type="number" id="impactProcNetRecvThreshold" min="0" step="10" placeholder="50">
+                    </div>
+                    <div class="modal-row">
+                        <label>网络发 (MB/s)</label>
+                        <input type="number" id="impactProcNetSendThreshold" min="0" step="10" placeholder="50">
+                    </div>
                 </div>
                 <div class="modal-buttons">
                     <button class="btn" onclick="closeImpactConfigModal()">取消</button>
@@ -1774,10 +1836,15 @@
                 process_gone: '进程消失',
                 impact_cpu: 'CPU影响',
                 impact_memory: '内存影响',
+                impact_mem_growth: '内存增速',
                 impact_disk_io: '磁盘IO影响',
                 impact_network: '网络影响',
                 impact_file: '文件冲突',
                 impact_port: '端口冲突',
+                impact_fds: '句柄过多',
+                impact_threads: '线程过多',
+                impact_open_files: '文件数过多',
+                impact_vms: '虚拟内存',
                 impact_resolved: '影响解除'
             };
             container.innerHTML = events.slice().reverse().map(e => {
@@ -1865,10 +1932,15 @@
             const typeNames = {
                 cpu: 'CPU竞争',
                 memory: '内存压力',
+                mem_growth: '内存增速',
                 disk_io: '磁盘IO',
                 network: '网络带宽',
                 file: '文件占用',
-                port: '端口占用'
+                port: '端口占用',
+                fds: '句柄数',
+                threads: '线程数',
+                open_files: '打开文件数',
+                vms: '虚拟内存'
             };
             
             const severityNames = {
@@ -2075,10 +2147,24 @@
         }
         
         function openImpactConfigModal() {
-            document.getElementById('impactCpuThreshold').value = currentImpactConfig.cpu_threshold || 80;
-            document.getElementById('impactMemThreshold').value = currentImpactConfig.memory_threshold || 85;
-            document.getElementById('impactDiskThreshold').value = currentImpactConfig.disk_io_threshold || 100;
-            document.getElementById('impactNetThreshold').value = currentImpactConfig.network_threshold || 100;
+            const c = currentImpactConfig;
+            // 系统级别阈值
+            document.getElementById('impactCpuThreshold').value = c.cpu_threshold || 80;
+            document.getElementById('impactMemThreshold').value = c.memory_threshold || 85;
+            document.getElementById('impactDiskThreshold').value = c.disk_io_threshold || 100;
+            document.getElementById('impactNetThreshold').value = c.network_threshold || 100;
+            // 进程级别阈值
+            document.getElementById('impactProcCpuThreshold').value = c.proc_cpu_threshold || 50;
+            document.getElementById('impactProcMemThreshold').value = c.proc_memory_threshold || 1000;
+            document.getElementById('impactProcMemGrowthThreshold').value = c.proc_mem_growth_threshold || 10;
+            document.getElementById('impactProcVMSThreshold').value = c.proc_vms_threshold || 0;
+            document.getElementById('impactProcFDsThreshold').value = c.proc_fds_threshold || 1000;
+            document.getElementById('impactProcThreadsThreshold').value = c.proc_threads_threshold || 500;
+            document.getElementById('impactProcOpenFilesThreshold').value = c.proc_open_files_threshold || 500;
+            document.getElementById('impactProcDiskReadThreshold').value = c.proc_disk_read_threshold || 50;
+            document.getElementById('impactProcDiskWriteThreshold').value = c.proc_disk_write_threshold || 50;
+            document.getElementById('impactProcNetRecvThreshold').value = c.proc_net_recv_threshold || 50;
+            document.getElementById('impactProcNetSendThreshold').value = c.proc_net_send_threshold || 50;
             document.getElementById('impactConfigModal').classList.add('show');
         }
         
@@ -2089,10 +2175,23 @@
         async function saveImpactConfig() {
             const config = {
                 ...currentImpactConfig,
+                // 系统级别阈值
                 cpu_threshold: parseFloat(document.getElementById('impactCpuThreshold').value) || 80,
                 memory_threshold: parseFloat(document.getElementById('impactMemThreshold').value) || 85,
                 disk_io_threshold: parseFloat(document.getElementById('impactDiskThreshold').value) || 100,
-                network_threshold: parseFloat(document.getElementById('impactNetThreshold').value) || 100
+                network_threshold: parseFloat(document.getElementById('impactNetThreshold').value) || 100,
+                // 进程级别阈值
+                proc_cpu_threshold: parseFloat(document.getElementById('impactProcCpuThreshold').value) || 0,
+                proc_memory_threshold: parseFloat(document.getElementById('impactProcMemThreshold').value) || 0,
+                proc_mem_growth_threshold: parseFloat(document.getElementById('impactProcMemGrowthThreshold').value) || 0,
+                proc_vms_threshold: parseFloat(document.getElementById('impactProcVMSThreshold').value) || 0,
+                proc_fds_threshold: parseInt(document.getElementById('impactProcFDsThreshold').value) || 0,
+                proc_threads_threshold: parseInt(document.getElementById('impactProcThreadsThreshold').value) || 0,
+                proc_open_files_threshold: parseInt(document.getElementById('impactProcOpenFilesThreshold').value) || 0,
+                proc_disk_read_threshold: parseFloat(document.getElementById('impactProcDiskReadThreshold').value) || 0,
+                proc_disk_write_threshold: parseFloat(document.getElementById('impactProcDiskWriteThreshold').value) || 0,
+                proc_net_recv_threshold: parseFloat(document.getElementById('impactProcNetRecvThreshold').value) || 0,
+                proc_net_send_threshold: parseFloat(document.getElementById('impactProcNetSendThreshold').value) || 0
             };
             try {
                 const res = await fetch('/api/config/impact', {
