@@ -62,21 +62,9 @@ func NewImpactAnalyzer(
 	getTargets func() []types.MonitorTarget,
 	getProcesses func() ([]types.ProcessInfo, error),
 ) *ImpactAnalyzer {
-	// 设置默认值
+	// 设置必须有值的字段默认值（这些字段不能为0）
 	if cfg.AnalysisInterval <= 0 {
 		cfg.AnalysisInterval = 5
-	}
-	if cfg.CPUThreshold <= 0 {
-		cfg.CPUThreshold = 80
-	}
-	if cfg.MemoryThreshold <= 0 {
-		cfg.MemoryThreshold = 85
-	}
-	if cfg.DiskIOThreshold <= 0 {
-		cfg.DiskIOThreshold = 100
-	}
-	if cfg.NetworkThreshold <= 0 {
-		cfg.NetworkThreshold = 100
 	}
 	if cfg.TopNProcesses <= 0 {
 		cfg.TopNProcesses = 10
@@ -90,54 +78,39 @@ func NewImpactAnalyzer(
 	if cfg.PortCheckInterval <= 0 {
 		cfg.PortCheckInterval = 30
 	}
-	// 进程级别阈值默认值
-	// 兼容旧字段
-	if cfg.ProcessCPUThreshold > 0 && cfg.ProcCPUThreshold <= 0 {
+	
+	// 系统级别阈值默认值（这些也必须有值）
+	if cfg.CPUThreshold <= 0 {
+		cfg.CPUThreshold = 80
+	}
+	if cfg.MemoryThreshold <= 0 {
+		cfg.MemoryThreshold = 85
+	}
+	if cfg.DiskIOThreshold <= 0 {
+		cfg.DiskIOThreshold = 100
+	}
+	if cfg.NetworkThreshold <= 0 {
+		cfg.NetworkThreshold = 100
+	}
+	
+	// 进程级别阈值：不再覆盖！
+	// 这些值应该从配置文件加载，0表示禁用检测
+	// 配置文件的默认值在 config/config.go 的 DefaultConfig() 中设置
+	
+	// 仅兼容旧字段（如果旧字段有值而新字段为0，则迁移）
+	if cfg.ProcessCPUThreshold > 0 && cfg.ProcCPUThreshold == 0 {
 		cfg.ProcCPUThreshold = cfg.ProcessCPUThreshold
 	}
-	if cfg.ProcessMemoryThreshold > 0 && cfg.ProcMemoryThreshold <= 0 {
+	if cfg.ProcessMemoryThreshold > 0 && cfg.ProcMemoryThreshold == 0 {
 		cfg.ProcMemoryThreshold = cfg.ProcessMemoryThreshold
 	}
-	if cfg.ProcessDiskIOThreshold > 0 && (cfg.ProcDiskReadThreshold <= 0 && cfg.ProcDiskWriteThreshold <= 0) {
+	if cfg.ProcessDiskIOThreshold > 0 && cfg.ProcDiskReadThreshold == 0 && cfg.ProcDiskWriteThreshold == 0 {
 		cfg.ProcDiskReadThreshold = cfg.ProcessDiskIOThreshold
 		cfg.ProcDiskWriteThreshold = cfg.ProcessDiskIOThreshold
 	}
-	if cfg.ProcessNetworkThreshold > 0 && (cfg.ProcNetRecvThreshold <= 0 && cfg.ProcNetSendThreshold <= 0) {
+	if cfg.ProcessNetworkThreshold > 0 && cfg.ProcNetRecvThreshold == 0 && cfg.ProcNetSendThreshold == 0 {
 		cfg.ProcNetRecvThreshold = cfg.ProcessNetworkThreshold
 		cfg.ProcNetSendThreshold = cfg.ProcessNetworkThreshold
-	}
-
-	// 设置新字段默认值
-	if cfg.ProcCPUThreshold <= 0 {
-		cfg.ProcCPUThreshold = 50 // 单进程 CPU > 50%
-	}
-	if cfg.ProcMemoryThreshold <= 0 {
-		cfg.ProcMemoryThreshold = 1000 // 单进程内存 > 1GB
-	}
-	if cfg.ProcMemGrowthThreshold <= 0 {
-		cfg.ProcMemGrowthThreshold = 10 // 单进程内存增速 > 10MB/s
-	}
-	// ProcVMSThreshold 默认 0，不检测
-	if cfg.ProcFDsThreshold <= 0 {
-		cfg.ProcFDsThreshold = 1000 // 单进程句柄数 > 1000
-	}
-	if cfg.ProcThreadsThreshold <= 0 {
-		cfg.ProcThreadsThreshold = 500 // 单进程线程数 > 500
-	}
-	if cfg.ProcOpenFilesThreshold <= 0 {
-		cfg.ProcOpenFilesThreshold = 500 // 单进程打开文件数 > 500
-	}
-	if cfg.ProcDiskReadThreshold <= 0 {
-		cfg.ProcDiskReadThreshold = 50 // 单进程磁盘读 > 50MB/s
-	}
-	if cfg.ProcDiskWriteThreshold <= 0 {
-		cfg.ProcDiskWriteThreshold = 50 // 单进程磁盘写 > 50MB/s
-	}
-	if cfg.ProcNetRecvThreshold <= 0 {
-		cfg.ProcNetRecvThreshold = 50 // 单进程网络收 > 50MB/s
-	}
-	if cfg.ProcNetSendThreshold <= 0 {
-		cfg.ProcNetSendThreshold = 50 // 单进程网络发 > 50MB/s
 	}
 
 	return &ImpactAnalyzer{
