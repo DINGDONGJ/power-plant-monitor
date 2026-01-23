@@ -407,3 +407,23 @@ func (m *MultiMonitor) GetImpactSummary() map[string]interface{} {
 	}
 	return m.impactAnalyzer.GetImpactSummary()
 }
+
+// GetEvents 获取所有事件 (CLI使用)
+func (m *MultiMonitor) GetEvents() []types.Event {
+	return m.eventsBuffer.GetRecent(10000) // 返回所有事件
+}
+
+// GetImpactEvents 获取所有影响事件 (CLI使用)
+func (m *MultiMonitor) GetImpactEvents() []types.ImpactEvent {
+	if m.impactAnalyzer == nil {
+		return []types.ImpactEvent{}
+	}
+	return m.impactAnalyzer.GetRecentImpacts(10000) // 返回所有影响事件
+}
+
+// ClearImpactEvents 清除所有影响事件 (CLI使用)
+func (m *MultiMonitor) ClearImpactEvents() {
+	if m.impactAnalyzer != nil {
+		m.impactAnalyzer.ClearImpacts()
+	}
+}

@@ -1,14 +1,15 @@
 # 电厂核心软件监视保障系统
 
-一个轻量级的进程监控代理系统，提供实时进程监控和 Web 管理界面。支持 Windows 和 Linux 双平台，可部署为系统服务实现 7×24 小时无人值守运行。
+一个轻量级的进程监控代理系统，提供实时进程监控、影响分析和管理界面。支持 Windows 和 Linux 双平台，可部署为系统服务实现 7×24 小时无人值守运行。
 
 ## 项目背景
 
 在电厂等关键基础设施环境中，核心软件的稳定运行至关重要。本系统旨在：
 - 实时监控关键进程的运行状态
 - 采集系统和进程级别的详细性能指标
+- 分析其他进程对监控目标的潜在影响
 - 检测进程启动/退出等状态变化
-- 提供直观的 Web 界面进行管理和查看
+- 提供 Web 界面和 CLI 两种管理方式
 
 ## 快速开始
 
@@ -37,21 +38,21 @@ sudo apt install libpcap-dev
 git clone <repository-url>
 cd monitor-agent
 
-# 编译 Windows 版本（自动请求管理员权限）
-go build -o monitor-web.exe ./cmd/web
+# 编译 Windows 版本
+go build -o bin/monitor-agent.exe ./cmd/web
 
 # 编译 Linux 版本
-GOOS=linux go build -o monitor-web ./cmd/web
+GOOS=linux go build -o bin/monitor-agent ./cmd/web
 ```
 
 ### 配置
 
 生成配置文件：
 ```bash
-.\monitor-web.exe -gen-config
+./monitor-agent.exe -gen-config
 ```
 
-编辑 `config.json`，添加需要监控的进程：
+编辑 `config.json`：
 ```json
 {
   "server": {
@@ -69,70 +70,166 @@ GOOS=linux go build -o monitor-web ./cmd/web
     "interval": 1,
     "metrics_buffer_len": 300,
     "events_buffer_len": 100
+  },
+  "impact": {
+    "enabled": true,
+    "cpu_threshold": 80,
+    "memory_threshold": 85,
+    "analysis_interval": 5
   }
 }
 ```
 
-### 运行
+---
 
-#### 方式一：Web UI 模式（推荐）
-```bash
-.\monitor-web.exe -config config.json
-```
-访问 http://localhost:8080 查看监控界面
+## 运行模式
 
-#### 方式二：CLI + Web 同时运行（数据共享）
+### 模式一：Web UI 模式（推荐生产环境）
+
 ```bash
-.\monitor-web.exe -cli -config config.json
+./monitor-agent.exe -config config.json
 ```
+
+- 启动 Web 服务器，访问 `http://localhost:8080` 查看监控界面
+- 适合远程监控和可视化展示
+- 按 `Ctrl+C` 退出
+
+### 模式二：CLI + Web 同时运行
+
+```bash
+./monitor-agent.exe -cli -config config.json
+```
+
 - CLI 在前台运行，可交互操作
-- Web 服务器在后台运行（如果 config.json 中 `server.enabled = true`）
-- **CLI 和 Web 共享同一个监控实例，数据完全同步**
-- 在 CLI 中添加的监控目标，Web 界面立即可见
-- 在 Web 中添加的监控目标，CLI 中 `list` 命令立即可见
+- Web 服务器在后台运行
+- **两者共享同一个监控实例，数据完全同步**
+- 在 CLI 中的操作，Web 界面立即可见
 
-#### 方式三：纯 CLI 模式（无 Web）
+### 模式三：纯 CLI 模式
+
 ```bash
-.\monitor-web.exe -cli-only -config config.json
-```
-或在 `config.json` 中设置 `server.enabled = false`，然后：
-```bash
-.\monitor-web.exe -cli -config config.json
+./monitor-agent.exe -cli-only -config config.json
 ```
 
-#### 方式四：后台监控（无交互）
-在 `config.json` 中设置 `server.enabled = false`，然后运行：
-```bash
-.\monitor-web.exe -config config.json
-```
+- 禁用 Web 服务器，仅运行 CLI
+- 适合服务器环境或不需要远程访问的场景
 
-### CLI 命令
+---
 
-在 CLI 交互模式下，可使用以下命令：
+## CLI 命令参考
+
+CLI 采用命令组架构，每个命令组包含多个子命令。
+
+### 配置管理 (config)
+
+| 命令 | 说明 |
+|------|------|
+| `config show` | 显示当前配置（包括采样、阈值等） |
+| `config set <key> <value>` | 设置配置项 |
+| `config save` | 保存配置到文件 |
+| `config reload` | 重新加载配置 |
+
+**可设置的配置项**：
+- `interval` - 采样间隔（秒）
+- `cpu-threshold` - 系统 CPU 阈值（%）
+- `memory-threshold` - 系统内存阈值（%）
+- `proc-cpu` - 进程 CPU 阈值（%）
+- `proc-mem` - 进程内存阈值（MB）
+
+### 目标管理 (target)
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `add <pid\|name> [alias]` | 添加监控目标 | `add 1234 核心进程` 或 `add nginx.exe Web服务` |
-| `remove <pid>` | 移除监控目标 | `remove 1234` |
-| `list` | 列出所有监控目标（显示完整指标）| `list` |
-| `status` | 显示系统状态（CPU、内存、网络、磁盘）| `status` |
-| `top [n]` | 显示 Top N 进程（按 CPU 排序）| `top 10` |
-| `events [n]` | 显示最近 N 条事件 | `events 20` |
-| `changes [n]` | 显示最近 N 条进程变化 | `changes 20` |
-| `watch <pid>` | 实时监控指定进程 | `watch 1234` |
-| `help` | 显示帮助信息 | `help` |
-| `exit` | 退出程序 | `exit` |
+| `target list` | 列出所有监控目标 | `target list` |
+| `target add <pid\|name> [alias]` | 添加监控目标 | `target add nginx Web服务` |
+| `target remove <pid>` | 移除监控目标 | `target remove 1234` |
+| `target info <pid>` | 显示目标详情 | `target info 1234` |
+| `target update <pid> <key> <val>` | 更新目标配置 | `target update 1234 alias 新名称` |
+| `target clear` | 清除所有目标 | `target clear` |
+
+### 影响分析 (impact)
+
+| 命令 | 说明 |
+|------|------|
+| `impact list [n]` | 显示影响事件（默认20条） |
+| `impact summary` | 显示影响统计汇总 |
+| `impact config` | 显示影响分析配置 |
+| `impact set <key> <value>` | 设置影响分析参数 |
+| `impact clear` | 清除所有影响事件 |
+
+### 系统信息 (system)
+
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `system status` | 显示系统整体状态 | `system status` |
+| `system top [n]` | 显示 Top N 进程（按 CPU） | `system top 20` |
+| `system ps [pattern]` | 列出进程（可过滤） | `system ps java` |
+| `system events [n]` | 显示最近事件 | `system events 50` |
+| `system watch <pid>` | 实时监控进程（60秒） | `system watch 1234` |
+
+### 日志管理 (log)
+
+| 命令 | 说明 |
+|------|------|
+| `log tail [n]` | 查看最近 N 条日志（默认50） |
+| `log filter <type>` | 按类型过滤（METRIC/EVENT/IMPACT） |
+| `log export <file>` | 导出日志到文件 |
+| `log files` | 列出所有日志文件 |
+| `log clear` | 清理 7 天前的日志 |
+
+### 通用命令
+
+| 命令 | 说明 |
+|------|------|
+| `help` 或 `?` | 显示帮助 |
+| `help <command>` | 显示指定命令组帮助 |
+| `clear` 或 `cls` | 清屏 |
+| `exit` 或 `quit` | 退出程序 |
+
+### CLI 快捷别名
+
+- `config` → `cfg`
+- `target` → `tgt`
+- `impact` → `imp`
+- `system` → `sys`
+
+---
+
+## Web UI 功能
+
+### 主界面
+- 系统资源实时曲线图（CPU/内存/网络），60秒历史数据
+- 监控目标列表，显示关键指标和状态
+- 影响事件实时显示
+
+### 进程列表
+- 实时显示系统所有进程
+- 支持按名称、PID、用户搜索
+- 同名进程自动分组
+- 可自定义显示列，拖拽调整顺序
+
+### 监控管理
+- 点击进程即可添加到监控
+- 支持设置别名、监控端口、监控文件
+- 实时显示监控目标的性能指标
+
+### 影响分析
+- 自动检测对监控目标的潜在影响
+- 显示影响类型、严重程度、来源进程
+- 提供处理建议
+
+---
 
 ## 命令行参数
 
 | 参数 | 说明 |
 |------|------|
-| `-config <file>` | 指定配置文件路径（默认：config.json）|
-| `-cli` | CLI 交互模式（Web 服务器根据配置决定是否启动）|
-| `-cli-only` | 纯 CLI 模式（强制禁用 Web 服务器）|
+| `-config <file>` | 指定配置文件（默认：config.json） |
+| `-cli` | CLI 模式（Web 根据配置决定是否启动） |
+| `-cli-only` | 纯 CLI 模式（禁用 Web） |
 | `-gen-config` | 生成示例配置文件 |
-| `-addr <addr>` | 覆盖配置中的服务器地址（如 `:8080`）|
-| `-log-dir <dir>` | 覆盖配置中的日志目录 |
+| `-addr <addr>` | 覆盖服务器地址（如 `:8080`） |
+| `-log-dir <dir>` | 覆盖日志目录 |
 | `-service` | 以服务模式运行 |
 | `-install` | 安装系统服务 |
 | `-uninstall` | 卸载系统服务 |
@@ -141,200 +238,74 @@ GOOS=linux go build -o monitor-web ./cmd/web
 | `-status` | 查看服务状态 |
 | `-version` | 显示版本信息 |
 
-## 功能特性
+---
 
-### 核心功能
-- **配置文件驱动**: 支持 JSON 配置文件，可自动加载监控目标
-- **CLI 交互模式**: 完整的命令行交互界面，支持实时查看和管理
-- **CLI 和 Web 数据共享**: 在 CLI 模式下，Web 服务器可在后台运行，两者共享同一个监控实例，数据完全同步
-- **后台监控**: 可在禁用 Web UI 的情况下运行，适合服务器环境
-- **增强日志**: JSONL 格式日志，可配置输出位置（控制台/文件）
+## 影响分析功能
 
-### 进程监控
-- 实时采集系统所有进程的 CPU、内存、磁盘 IO、网络流量等指标
-- 支持按进程名、PID、用户等条件搜索过滤
-- 同名进程自动分组，支持展开/折叠查看
-- 可自定义显示列，支持拖拽调整列顺序和宽度
-- 自动检测新进程启动和进程消失
+### 检测类型
 
-### Web 界面（可选）
-- 终端风格的黑绿配色，专业感强
-- 系统资源实时曲线图（CPU/内存/网络），60秒历史数据
-- 监控列表和进程列表双表格布局
-- 响应式设计，支持各种屏幕尺寸
+| 类型 | 说明 |
+|------|------|
+| CPU 竞争 | 其他进程占用大量 CPU，影响监控目标 |
+| 内存压力 | 系统内存不足或其他进程内存占用过高 |
+| 磁盘 IO | 其他进程磁盘读写影响监控目标 |
+| 网络 IO | 其他进程网络流量影响监控目标 |
+| 端口冲突 | 其他进程占用监控目标的端口 |
+| 文件冲突 | 其他进程访问监控目标的关键文件 |
 
-## 监控指标说明
+### 严重级别
 
-### 系统级指标
+- **critical** - 严重影响，需立即处理
+- **high** - 高影响，建议尽快处理
+- **medium** - 中等影响，建议关注
+- **low** - 轻微影响
 
-| 指标 | JSON 字段 | 数据来源 | 说明 |
-|------|-----------|----------|------|
-| CPU 总使用率 | `cpu_percent` | gopsutil `cpu.Times()` | 系统整体 CPU 占用百分比 |
-| CPU 用户态 | `cpu_user` | gopsutil `cpu.Times()` | 用户态 CPU 占用百分比 |
-| CPU 内核态 | `cpu_system` | gopsutil `cpu.Times()` | 内核态 CPU 占用百分比 |
-| CPU IO等待 | `cpu_iowait` | gopsutil `cpu.Times()` | 等待 IO 的 CPU 百分比（Linux 特有） |
-| CPU 空闲 | `cpu_idle` | gopsutil `cpu.Times()` | 空闲 CPU 百分比 |
-| 内存总量 | `memory_total` | gopsutil `mem.VirtualMemory()` | 系统物理内存总量 |
-| 内存已用 | `memory_used` | gopsutil `mem.VirtualMemory()` | 已使用的物理内存 |
-| 内存可用 | `memory_available` | gopsutil `mem.VirtualMemory()` | 可用内存（含缓存可回收部分） |
-| 内存使用率 | `memory_percent` | 计算值 | 已用内存 / 总内存 × 100% |
-| Swap 总量 | `swap_total` | gopsutil `mem.SwapMemory()` | 交换空间总量 |
-| Swap 已用 | `swap_used` | gopsutil `mem.SwapMemory()` | 已使用的交换空间 |
-| Swap 换入速率 | `swap_in_rate` | gopsutil `mem.SwapMemory()` | 每秒换入字节数 |
-| Swap 换出速率 | `swap_out_rate` | gopsutil `mem.SwapMemory()` | 每秒换出字节数 |
-| 网络接收速率 | `net_recv_rate` | gopacket 抓包统计 | 所有进程接收流量之和 (B/s) |
-| 网络发送速率 | `net_send_rate` | gopacket 抓包统计 | 所有进程发送流量之和 (B/s) |
-| 磁盘读取速率 | `disk_read_rate` | gopsutil `disk.IOCounters()` | 系统磁盘读取速率 (B/s) |
-| 磁盘写入速率 | `disk_write_rate` | gopsutil `disk.IOCounters()` | 系统磁盘写入速率 (B/s) |
-| 磁盘读取 IOPS | `disk_read_ops` | gopsutil `disk.IOCounters()` | 每秒磁盘读取操作数 |
-| 磁盘写入 IOPS | `disk_write_ops` | gopsutil `disk.IOCounters()` | 每秒磁盘写入操作数 |
-| 系统负载 (1分钟) | `load_avg_1` | gopsutil `load.Avg()` | 1 分钟平均负载（Linux 特有） |
-| 系统负载 (5分钟) | `load_avg_5` | gopsutil `load.Avg()` | 5 分钟平均负载（Linux 特有） |
-| 系统负载 (15分钟) | `load_avg_15` | gopsutil `load.Avg()` | 15 分钟平均负载（Linux 特有） |
-| 进程总数 | `process_count` | gopsutil `process.Processes()` | 系统中运行的进程总数 |
-| 线程总数 | `thread_count` | 计算值 | 系统中所有进程的线程数之和 |
+### 阈值配置
 
-### 进程级指标
+在 `config.json` 的 `impact` 部分配置：
 
-| 指标 | 列名 | JSON 字段 | 数据来源 | 说明 |
-|------|------|-----------|----------|------|
-| 进程名称 | 进程名称 | `name` | gopsutil `proc.Name()` | 可执行文件名 |
-| 进程 ID | PID | `pid` | gopsutil `proc.Pid` | 系统分配的进程标识符 |
-| 运行状态 | 状态 | `status` | gopsutil `proc.Status()` | running/sleeping/stopped 等 |
-| 用户名 | 发布者 | `username` | gopsutil `proc.Username()` | 进程所属用户 |
-| CPU 占用 | CPU% | `cpu_pct` | gopsutil `proc.CPUPercent()` | 进程 CPU 使用百分比 |
-| 物理内存 | 内存 | `rss_bytes` | gopsutil `proc.MemoryInfo().RSS` | 常驻内存集大小 |
-| 内存增长速率 | 内存增速 | `rss_growth_rate` | 计算值 | RSS 每秒变化量 (B/s)，正值=增长，负值=释放 |
-| 虚拟内存 | 虚拟内存 | `vms` | gopsutil `proc.MemoryInfo().VMS` | 虚拟内存大小 |
-| 句柄数 | 句柄 | `num_fds` | 平台特定 | 打开的文件/资源句柄数 |
-| 线程数 | 线程 | `num_threads` | gopsutil `proc.NumThreads()` | 进程的线程数 |
-| 优先级 | 优先级 | `priority` | 平台特定 | 进程调度优先级 |
-| Nice 值 | - | `nice` | gopsutil `proc.Nice()` | 进程 nice 值（Linux 特有） |
-| 磁盘读取速率 | 磁盘读 | `disk_read_rate` | gopsutil `proc.IOCounters()` | 每秒读取字节数 |
-| 磁盘写入速率 | 磁盘写 | `disk_write_rate` | gopsutil `proc.IOCounters()` | 每秒写入字节数 |
-| 网络接收速率 | 网络收 | `net_recv_rate` | gopacket 抓包 + 端口映射 | 进程每秒接收字节数 |
-| 网络发送速率 | 网络发 | `net_send_rate` | gopacket 抓包 + 端口映射 | 进程每秒发送字节数 |
-| 运行时长 | 已运行 | `uptime` | gopsutil `proc.CreateTime()` | 当前时间 - 进程创建时间（秒） |
-| 命令行 | 命令行 | `cmdline` | gopsutil `proc.Cmdline()` | 完整启动命令 |
-
-### 进程状态变化检测
-
-系统自动检测并记录以下进程变化事件：
-
-| 事件类型 | JSON `type` | 说明 |
-|----------|-------------|------|
-| 新进程启动 | `new_process` | 检测到系统中出现新进程 |
-| 进程消失 | `process_gone` | 检测到进程从系统中消失 |
-| 监控目标退出 | `exit` | 被监控的目标进程退出 |
-
-### 网络流量监控原理
-
-进程网络流量使用 **gopacket 抓包** 实现精确统计：
-
-1. **抓包**：在所有非 loopback 网卡上启动抓包，过滤 TCP/UDP 流量
-2. **端口映射**：每 2 秒通过 `net.Connections()` 更新端口到 PID 的映射表
-3. **流量归属**：
-   - 源端口匹配本机进程 → 计入该进程的发送流量
-   - 目标端口匹配本机进程 → 计入该进程的接收流量
-4. **速率计算**：每秒计算一次流量差值得到速率
-
-**特点**：
-- 系统总流量 = 所有进程流量之和（数据源统一）
-- 精确到每个数据包
-- 需要管理员/root 权限
-
-### 平台差异
-
-| 指标 | Windows | Linux |
-|------|---------|-------|
-| CPU IO等待 | 不支持（返回 0） | 支持 |
-| 系统负载 | 不支持（返回 0） | 支持 |
-| 句柄数 | `GetProcessHandleCount` Win32 API | `/proc/[pid]/fd` 目录计数 |
-| 优先级 | `GetPriorityClass` Win32 API（返回 4-24） | gopsutil `proc.Nice()`（返回 nice 值） |
-| 网络抓包 | 需要 Npcap | 需要 libpcap-dev |
-
-### 数据采集频率
-
-| 数据类型 | 后端采集间隔 | 前端刷新间隔 |
-|----------|--------------|--------------|
-| 系统指标 | 1 秒 | 2 秒 |
-| 进程列表 | 按需（API 调用时） | 2 秒 |
-| 监控目标指标 | 1 秒 | 2 秒 |
-| 端口-PID 映射 | 2 秒 | - |
-| 网络流量速率 | 1 秒 | 2 秒 |
-
-## 系统架构
-
-```
-monitor-agent/
-├── cmd/web/              # 主程序入口
-│   ├── main.go           # 命令行参数处理
-│   ├── signal_windows.go # Windows 信号处理
-│   └── signal_linux.go   # Linux 信号处理
-├── monitor/              # 监控核心逻辑
-│   ├── multi_monitor.go  # 多进程监控器
-│   └── process_tracker.go # 进程变化追踪器
-├── provider/             # 系统指标采集
-│   ├── provider.go       # 接口定义
-│   ├── provider_common.go  # 通用实现（gopsutil）
-│   ├── provider_windows.go # Windows 特定实现
-│   └── provider_linux.go   # Linux 特定实现
-├── netmon/               # 网络流量监控
-│   └── netmon.go         # gopacket 抓包实现
-├── server/               # HTTP 服务
-│   ├── web_server.go     # API 路由和处理
-│   └── static/           # 静态资源（嵌入到二进制）
-│       └── index.html    # Web 界面
-├── service/              # 系统服务支持
-│   ├── service.go        # 服务核心逻辑
-│   ├── service_windows.go # Windows Service 实现
-│   └── service_linux.go    # Linux systemd 实现
-├── buffer/               # 数据结构
-│   └── ring.go           # 泛型环形缓冲区
-├── logger/               # 日志记录
-│   └── jsonl.go          # JSONL 格式日志
-├── types/                # 数据类型定义
-│   └── types.go          # 结构体定义
-└── logs/                 # 日志输出目录
+```json
+{
+  "impact": {
+    "enabled": true,
+    "analysis_interval": 5,
+    "cpu_threshold": 80,
+    "memory_threshold": 85,
+    "disk_io_threshold": 100,
+    "proc_cpu_threshold": 50,
+    "proc_memory_threshold": 1000,
+    "proc_threads_threshold": 500,
+    "proc_fds_threshold": 1000
+  }
+}
 ```
 
+---
 
-## 技术栈
+## 日志系统
 
-### 后端语言
-- **Go 1.19+**：高性能、跨平台编译、原生并发支持、单文件部署
+### 日志格式
 
-### 核心依赖
+所有日志统一使用 JSONL 格式，每行一个 JSON 对象：
 
-| 包名 | 版本 | 用途 |
-|------|------|------|
-| `github.com/shirou/gopsutil/v3` | v3.23.12 | 跨平台系统信息采集（进程、CPU、内存、磁盘 IO） |
-| `github.com/google/gopacket` | v1.1.19 | 网络抓包，精确统计进程网络流量 |
-| `golang.org/x/sys` | v0.15.0 | Windows Service API 支持 |
-
-### 编译依赖
-
-进程网络流量监控使用 gopacket 抓包，需要安装 pcap 库：
-
-**Linux**：
-```bash
-sudo apt install libpcap-dev
+```json
+{"timestamp":"2026-01-23T10:30:00Z","level":"INFO","category":"METRIC","message":"Process metrics collected","data":{"pid":1234,"cpu":25.5}}
 ```
 
-**Windows**：
-- 下载安装 [Npcap](https://npcap.com/)
-- 安装时勾选 "Install Npcap in WinPcap API-compatible Mode"
+### 日志类别
 
-### 前端技术
-- **HTML5/CSS3**：页面结构和样式，终端风格设计
-- **原生 JavaScript (ES6+)**：无框架依赖，轻量高效
-- **Canvas API**：实时绘制 CPU/内存时间序列曲线图
-- **Fetch API**：异步请求后端 RESTful API
-- **LocalStorage**：保存用户列配置偏好
+| 类别 | 说明 |
+|------|------|
+| SERVICE | 服务运行日志 |
+| METRIC | 指标采集日志 |
+| EVENT | 事件日志（进程启动/退出） |
+| IMPACT | 影响分析日志 |
 
-### 数据格式
-- **JSON**：API 请求响应格式
-- **JSONL**：日志文件格式（每行一个 JSON 对象，便于流式处理）
+### 日志文件
+
+日志保存在 `logs/` 目录，文件名格式：`monitor_YYYYMMDD_HHMMSS.jsonl`
+
+---
 
 ## 服务部署
 
@@ -344,26 +315,26 @@ sudo apt install libpcap-dev
 
 ```powershell
 # 安装服务
-.\monitor-web.exe -install
+.\monitor-agent.exe -install
 
 # 启动服务
-.\monitor-web.exe -start
+.\monitor-agent.exe -start
 
 # 查看状态
-.\monitor-web.exe -status
+.\monitor-agent.exe -status
 
 # 停止服务
-.\monitor-web.exe -stop
+.\monitor-agent.exe -stop
 
 # 卸载服务
-.\monitor-web.exe -uninstall
+.\monitor-agent.exe -uninstall
 ```
 
 ### Linux systemd
 
 ```bash
-# 安装服务（需要 root 权限）
-sudo ./monitor-web -install
+# 安装服务（需要 root）
+sudo ./monitor-agent -install
 
 # 启用并启动
 sudo systemctl daemon-reload
@@ -373,16 +344,18 @@ sudo systemctl start monitor-agent
 # 查看状态
 sudo systemctl status monitor-agent
 
-# 卸载服务
-sudo ./monitor-web -uninstall
+# 卸载
+sudo ./monitor-agent -uninstall
 ```
+
+---
 
 ## API 接口
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | `/api/processes` | GET | 获取所有进程列表 |
-| `/api/system` | GET | 获取系统指标（CPU/内存/磁盘/网络） |
+| `/api/system` | GET | 获取系统指标 |
 | `/api/monitor/targets` | GET | 获取监控目标列表 |
 | `/api/monitor/add` | POST | 添加监控目标 |
 | `/api/monitor/remove` | POST | 移除监控目标 |
@@ -390,63 +363,43 @@ sudo ./monitor-web -uninstall
 | `/api/monitor/update` | POST | 更新目标配置 |
 | `/api/events` | GET | 获取事件日志 |
 | `/api/process-changes` | GET | 获取进程变化记录 |
-| `/api/status` | GET | 获取监控状态 |
+| `/api/impacts` | GET | 获取影响事件 |
+| `/api/impact/summary` | GET | 获取影响统计 |
 
-### API 响应示例
+---
 
-**GET /api/system**
-```json
-{
-  "cpu_percent": 25.5,
-  "cpu_user": 15.2,
-  "cpu_system": 8.3,
-  "cpu_iowait": 2.0,
-  "cpu_idle": 74.5,
-  "memory_total": 17179869184,
-  "memory_used": 8589934592,
-  "memory_available": 8589934592,
-  "memory_percent": 50.0,
-  "swap_total": 4294967296,
-  "swap_used": 1073741824,
-  "swap_percent": 25.0,
-  "swap_in_rate": 0,
-  "swap_out_rate": 0,
-  "net_recv_rate": 102400,
-  "net_send_rate": 51200,
-  "disk_read_rate": 1048576,
-  "disk_write_rate": 524288,
-  "disk_read_ops": 100,
-  "disk_write_ops": 50
-}
+## 系统架构
+
+```
+monitor-agent/
+├── cmd/web/              # 主程序入口
+├── cli/                  # CLI 命令行界面
+│   ├── cli.go            # CLI 主框架
+│   ├── formatter.go      # 输出格式化
+│   ├── cmd_config.go     # 配置命令组
+│   ├── cmd_target.go     # 目标命令组
+│   ├── cmd_impact.go     # 影响命令组
+│   ├── cmd_system.go     # 系统命令组
+│   └── cmd_log.go        # 日志命令组
+├── monitor/              # 监控核心逻辑
+│   ├── multi_monitor.go  # 多进程监控器
+│   └── process_tracker.go # 进程变化追踪器
+├── impact/               # 影响分析
+│   ├── analyzer.go       # 影响分析器
+│   ├── file_checker.go   # 文件冲突检测
+│   └── port_checker.go   # 端口冲突检测
+├── provider/             # 系统指标采集
+├── netmon/               # 网络流量监控
+├── server/               # HTTP 服务
+├── service/              # 系统服务支持
+├── logger/               # 统一日志
+├── buffer/               # 数据结构
+├── config/               # 配置管理
+├── types/                # 类型定义
+└── logs/                 # 日志输出目录
 ```
 
-**GET /api/process-changes**
-```json
-[
-  {
-    "timestamp": "2026-01-16T10:30:00Z",
-    "type": "new",
-    "pid": 12345,
-    "name": "notepad.exe",
-    "cmdline": "C:\\Windows\\notepad.exe"
-  },
-  {
-    "timestamp": "2026-01-16T10:29:00Z",
-    "type": "gone",
-    "pid": 12340,
-    "name": "calc.exe"
-  }
-]
-```
-
-## 日志文件
-
-日志保存在 `logs/` 目录：
-
-| 文件 | 说明 |
-|------|------|
-| `service.log` | 服务运行日志 |
-| `multi_monitor_*.jsonl` | 监控数据（JSONL 格式） |
+---
 
 ## 常见问题
 
@@ -454,13 +407,18 @@ sudo ./monitor-web -uninstall
 A: 需要管理员/root 权限才能进行网络抓包。Windows 需要安装 Npcap，Linux 需要 libpcap-dev。
 
 ### Q: CPU IO等待在 Windows 上显示为 0？
-A: 这是正常的，Windows 不提供 IO 等待时间指标。
+A: 正常现象，Windows 不提供 IO 等待时间指标。
 
-### Q: 内存增速列显示红色/绿色是什么意思？
-A: 红色表示内存正在增长（可能存在内存泄漏），绿色表示内存正在释放，灰色表示稳定。
+### Q: 如何只使用 CLI 不启动 Web？
+A: 使用 `-cli-only` 参数，或在配置中设置 `server.enabled = false`。
+
+### Q: CLI 和 Web 数据是否同步？
+A: 是的，两者共享同一个监控实例，数据完全同步。
 
 ### Q: 如何监控远程服务器？
-A: 在远程服务器上部署本程序，通过 `http://<服务器IP>:8080` 访问。注意配置防火墙规则。
+A: 在远程服务器部署本程序，通过 `http://<服务器IP>:8080` 访问。
+
+---
 
 ## 许可证
 

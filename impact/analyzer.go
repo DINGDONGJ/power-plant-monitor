@@ -288,6 +288,11 @@ func (a *ImpactAnalyzer) ClearAllEvents() {
 	a.activeImpacts = make(map[impactKey]*types.ImpactEvent)
 }
 
+// ClearImpacts 清除所有影响事件（CLI使用，与ClearAllEvents相同）
+func (a *ImpactAnalyzer) ClearImpacts() {
+	a.ClearAllEvents()
+}
+
 func (a *ImpactAnalyzer) loop() {
 	ticker := time.NewTicker(time.Duration(a.config.AnalysisInterval) * time.Second)
 	defer ticker.Stop()

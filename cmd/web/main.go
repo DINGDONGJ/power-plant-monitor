@@ -4,6 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"monitor-agent/cli"
 	"monitor-agent/config"
@@ -179,9 +182,15 @@ func runCLIWithOptionalWeb(serviceCfg service.Config, cfg *config.Config) {
 	fmt.Println()
 
 	// 启动 CLI（在前台运行）
-	cliInterface := cli.NewCLI(s.GetMonitor())
+	cliInterface := cli.NewCLI(s.GetMonitor(), serviceCfg.ConfigFile, cfg)
 	cliInterface.Run()
 
 	// CLI 退出后停止服务
 	s.Stop()
+}
+
+func waitForSignal() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
 }
