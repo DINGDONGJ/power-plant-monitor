@@ -2,11 +2,11 @@ package impact
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"sync"
 	"time"
 
+	"monitor-agent/logger"
 	"monitor-agent/provider"
 	"monitor-agent/types"
 )
@@ -138,7 +138,7 @@ func (a *ImpactAnalyzer) Start() {
 	a.mu.Unlock()
 
 	go a.loop()
-	log.Printf("[INFO] ImpactAnalyzer started (interval=%ds)", a.config.AnalysisInterval)
+	logger.Infof("IMPACT", "ImpactAnalyzer started (interval=%ds)", a.config.AnalysisInterval)
 }
 
 // Stop 停止影响分析
@@ -152,7 +152,7 @@ func (a *ImpactAnalyzer) Stop() {
 	a.running = false
 	close(a.stopCh)
 	a.stopCh = make(chan struct{})
-	log.Printf("[INFO] ImpactAnalyzer stopped")
+	logger.Info("IMPACT", "ImpactAnalyzer stopped")
 }
 
 // IsRunning 返回运行状态
@@ -205,7 +205,7 @@ func (a *ImpactAnalyzer) UpdateConfig(cfg types.ImpactConfig) {
 	a.config.ProcNetRecvThreshold = cfg.ProcNetRecvThreshold
 	a.config.ProcNetSendThreshold = cfg.ProcNetSendThreshold
 	
-	log.Printf("[INFO] ImpactAnalyzer config updated: SysCPU=%.0f%%, SysMem=%.0f%%, ProcCPU=%.0f%%, ProcMem=%.0fMB",
+	logger.Infof("IMPACT", "Config updated: SysCPU=%.0f%%, SysMem=%.0f%%, ProcCPU=%.0f%%, ProcMem=%.0fMB",
 		a.config.CPUThreshold, a.config.MemoryThreshold, a.config.ProcCPUThreshold, a.config.ProcMemoryThreshold)
 }
 
@@ -278,7 +278,7 @@ func (a *ImpactAnalyzer) RemoveTargetEvents(targetPID int32) {
 			delete(a.activeImpacts, key)
 		}
 	}
-	log.Printf("[INFO] Removed impact events for target PID %d", targetPID)
+	logger.Infof("IMPACT", "Removed impact events for target PID %d", targetPID)
 }
 
 // ClearAllEvents 清除所有事件
@@ -315,14 +315,14 @@ func (a *ImpactAnalyzer) analyze() {
 	// 获取系统指标
 	sysMetrics, err := a.provider.GetSystemMetrics()
 	if err != nil {
-		log.Printf("[WARN] ImpactAnalyzer: get system metrics failed: %v", err)
+		logger.Warnf("IMPACT", "Get system metrics failed: %v", err)
 		return
 	}
 
 	// 获取所有进程
 	processes, err := a.getProcesses()
 	if err != nil {
-		log.Printf("[WARN] ImpactAnalyzer: list processes failed: %v", err)
+		logger.Warnf("IMPACT", "List processes failed: %v", err)
 		return
 	}
 
@@ -1049,8 +1049,7 @@ func (a *ImpactAnalyzer) recordImpact(event types.ImpactEvent, detail string) {
 	a.mu.Unlock()
 
 	if !exists {
-		log.Printf("[IMPACT] [%s] [%s] 目标: %s, 来源: %s - %s",
-			event.ImpactType, event.Severity, event.TargetName, event.SourceName, event.Description)
+		logger.Impact(event.ImpactType, event.Severity, event.TargetName, event.SourceName, event.Description)
 
 		// 记录到事件日志
 		if callback != nil {

@@ -11,6 +11,7 @@ import (
 
 	"monitor-agent/config"
 	"monitor-agent/impact"
+	"monitor-agent/logger"
 	"monitor-agent/monitor"
 	"monitor-agent/provider"
 	"monitor-agent/server"
@@ -48,18 +49,15 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 	}
 	os.MkdirAll(cfg.LogDir, 0755)
 
-	// 设置日志输出
-	if appCfg.Logging.FileOutput {
-		logFile := filepath.Join(cfg.LogDir, "service.log")
-		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-		if err == nil {
-			if appCfg.Logging.ConsoleOutput {
-				// 同时输出到文件和控制台
-				log.SetOutput(f)
-			} else {
-				log.SetOutput(f)
-			}
-		}
+	// 初始化统一日志器
+	if err := logger.Init(cfg.LogDir, appCfg.Logging.FileOutput, appCfg.Logging.ConsoleOutput); err != nil {
+		return nil, fmt.Errorf("init logger: %w", err)
+	}
+
+	// 设置标准log输出到统一日志器（兼容老代码）
+	if logger.Default() != nil {
+		log.SetOutput(logger.Default().GetWriter())
+		log.SetFlags(0) // 不使用标准log的时间戳前缀
 	}
 
 	monitorCfg := types.MultiMonitorConfig{
@@ -88,7 +86,7 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 			mm.AddImpactEvent(eventType, pid, name, message)
 		})
 		mm.SetImpactAnalyzer(analyzer)
-		log.Printf("[SERVICE] Impact analyzer enabled (interval=%ds)", appCfg.Impact.AnalysisInterval)
+		logger.Infof("SERVICE", "Impact analyzer enabled (interval=%ds)", appCfg.Impact.AnalysisInterval)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -104,15 +102,15 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 
 // Start 启动服务
 func (s *Service) Start() error {
-	log.Printf("[SERVICE] Starting monitor service...")
-	log.Printf("[SERVICE] Log directory: %s", s.config.LogDir)
+	logger.Info("SERVICE", "Starting monitor service...")
+	logger.Infof("SERVICE", "Log directory: %s", s.config.LogDir)
 
 	// 启动监控
 	s.mm.Start()
 
 	// 从配置文件加载监控目标
 	if err := s.loadTargetsFromConfig(); err != nil {
-		log.Printf("[SERVICE] Load targets from config failed: %v", err)
+		logger.Errorf("SERVICE", "Load targets from config failed: %v", err)
 	}
 
 	// 启动 HTTP 服务器（如果启用）
@@ -124,22 +122,22 @@ func (s *Service) Start() error {
 		}
 
 		go func() {
-			log.Printf("[SERVICE] HTTP server listening on %s", s.config.Addr)
+			logger.Infof("SERVICE", "HTTP server listening on %s", s.config.Addr)
 			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("[SERVICE] HTTP server error: %v", err)
+				logger.Errorf("SERVICE", "HTTP server error: %v", err)
 			}
 		}()
 	} else {
-		log.Printf("[SERVICE] HTTP server disabled")
+		logger.Info("SERVICE", "HTTP server disabled")
 	}
 
-	log.Printf("[SERVICE] Service started successfully")
+	logger.Info("SERVICE", "Service started successfully")
 	return nil
 }
 
 // Stop 停止服务
 func (s *Service) Stop() error {
-	log.Printf("[SERVICE] Stopping monitor service...")
+	logger.Info("SERVICE", "Stopping monitor service...")
 
 	// 停止监控
 	s.mm.Stop()
@@ -149,12 +147,13 @@ func (s *Service) Stop() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.httpServer.Shutdown(ctx); err != nil {
-			log.Printf("[SERVICE] HTTP server shutdown error: %v", err)
+			logger.Errorf("SERVICE", "HTTP server shutdown error: %v", err)
 		}
 	}
 
 	s.cancel()
-	log.Printf("[SERVICE] Service stopped")
+	logger.Info("SERVICE", "Service stopped")
+	logger.Close() // 关闭日志器
 	return nil
 }
 
@@ -171,11 +170,11 @@ func (s *Service) GetMonitor() *monitor.MultiMonitor {
 // loadTargetsFromConfig 从配置文件加载监控目标
 func (s *Service) loadTargetsFromConfig() error {
 	if len(s.appConfig.Targets) == 0 {
-		log.Printf("[SERVICE] No targets in config")
+		logger.Info("SERVICE", "No targets in config")
 		return nil
 	}
 
-	log.Printf("[SERVICE] Loading %d targets from config...", len(s.appConfig.Targets))
+	logger.Infof("SERVICE", "Loading %d targets from config...", len(s.appConfig.Targets))
 
 	// 获取当前进程列表
 	processes, err := s.mm.ListAllProcesses()
@@ -195,27 +194,27 @@ func (s *Service) loadTargetsFromConfig() error {
 		// 如果指定了 PID，直接使用
 		if target.PID > 0 {
 			if err := s.mm.AddTarget(target); err != nil {
-				log.Printf("[SERVICE] Add target PID %d failed: %v", target.PID, err)
+				logger.Errorf("SERVICE", "Add target PID %d failed: %v", target.PID, err)
 			} else {
-				log.Printf("[SERVICE] Added target: %s (PID %d)", target.Name, target.PID)
+				logger.Infof("SERVICE", "Added target: %s (PID %d)", target.Name, target.PID)
 			}
 			continue
 		}
 
 		// 按进程名查找
 		if target.Name == "" {
-			log.Printf("[SERVICE] Skip target: no PID or name specified")
+			logger.Warn("SERVICE", "Skip target: no PID or name specified")
 			continue
 		}
 
 		procs, found := nameToProcs[target.Name]
 		if !found || len(procs) == 0 {
-			log.Printf("[SERVICE] Process '%s' not found", target.Name)
+			logger.Warnf("SERVICE", "Process '%s' not found", target.Name)
 			continue
 		}
 
 		if len(procs) > 1 {
-			log.Printf("[SERVICE] Multiple processes found for '%s', using first one (PID %d)",
+			logger.Infof("SERVICE", "Multiple processes found for '%s', using first one (PID %d)",
 				target.Name, procs[0].PID)
 		}
 
@@ -223,9 +222,9 @@ func (s *Service) loadTargetsFromConfig() error {
 		target.PID = procs[0].PID
 		target.Cmdline = procs[0].Cmdline
 		if err := s.mm.AddTarget(target); err != nil {
-			log.Printf("[SERVICE] Add target '%s' failed: %v", target.Name, err)
+			logger.Errorf("SERVICE", "Add target '%s' failed: %v", target.Name, err)
 		} else {
-			log.Printf("[SERVICE] Added target: %s (PID %d)", target.Name, target.PID)
+			logger.Infof("SERVICE", "Added target: %s (PID %d)", target.Name, target.PID)
 		}
 	}
 

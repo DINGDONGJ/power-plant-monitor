@@ -1,16 +1,14 @@
 package monitor
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"monitor-agent/buffer"
 	"monitor-agent/impact"
+	"monitor-agent/logger"
 	"monitor-agent/provider"
 	"monitor-agent/types"
 )
@@ -25,7 +23,6 @@ type MultiMonitor struct {
 	config         types.MultiMonitorConfig
 	running        bool
 	stopCh         chan struct{}
-	logFile        *os.File
 
 	// 进程变化追踪
 	processTracker *ProcessTracker
@@ -53,14 +50,6 @@ func NewMultiMonitor(cfg types.MultiMonitorConfig, prov provider.ProcProvider) (
 	if cfg.LogDir == "" {
 		cfg.LogDir = "logs"
 	}
-	os.MkdirAll(cfg.LogDir, 0755)
-
-	// 创建日志文件
-	logPath := fmt.Sprintf("%s/multi_monitor_%s.jsonl", cfg.LogDir, time.Now().Format("20060102_150405"))
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return nil, err
-	}
 
 	m := &MultiMonitor{
 		provider:       prov,
@@ -69,7 +58,6 @@ func NewMultiMonitor(cfg types.MultiMonitorConfig, prov provider.ProcProvider) (
 		eventsBuffer:   buffer.NewRingBuffer[types.Event](cfg.EventsBufferLen),
 		config:         cfg,
 		stopCh:         make(chan struct{}),
-		logFile:        logFile,
 		processTracker: NewProcessTracker(200), // 保留最近 200 条进程变化
 	}
 
@@ -121,7 +109,7 @@ func (m *MultiMonitor) AddTarget(target types.MonitorTarget) error {
 	}
 	m.metricsBuffers[target.PID] = buf
 
-	log.Printf("[INFO] Added monitor target: PID=%d Name=%s", target.PID, target.Name)
+	logger.Infof("MONITOR", "Added monitor target: PID=%d Name=%s", target.PID, target.Name)
 	return nil
 }
 
@@ -137,7 +125,7 @@ func (m *MultiMonitor) RemoveTarget(pid int32) {
 		m.impactAnalyzer.RemoveTargetEvents(pid)
 	}
 
-	log.Printf("[INFO] Removed monitor target: PID=%d", pid)
+	logger.Infof("MONITOR", "Removed monitor target: PID=%d", pid)
 }
 
 // RemoveAllTargets 移除所有监控目标
@@ -152,7 +140,7 @@ func (m *MultiMonitor) RemoveAllTargets() {
 		m.impactAnalyzer.ClearAllEvents()
 	}
 
-	log.Printf("[INFO] Removed all monitor targets")
+	logger.Info("MONITOR", "Removed all monitor targets")
 }
 
 // UpdateTarget 更新监控目标配置
@@ -166,7 +154,7 @@ func (m *MultiMonitor) UpdateTarget(target types.MonitorTarget) error {
 	}
 
 	state.target = target
-	log.Printf("[INFO] Updated monitor target: PID=%d Name=%s", target.PID, target.Name)
+	logger.Infof("MONITOR", "Updated monitor target: PID=%d Name=%s", target.PID, target.Name)
 	return nil
 }
 
@@ -198,18 +186,10 @@ func (m *MultiMonitor) Start() {
 		return
 	}
 	m.running = true
-
-	// 如果日志文件已关闭，重新创建
-	if m.logFile == nil {
-		logPath := fmt.Sprintf("%s/multi_monitor_%s.jsonl", m.config.LogDir, time.Now().Format("20060102_150405"))
-		if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-			m.logFile = f
-		}
-	}
 	m.mu.Unlock()
 
 	go m.loop()
-	log.Printf("[INFO] MultiMonitor started")
+	logger.Info("MONITOR", "MultiMonitor started")
 
 	// 启动影响分析器
 	if m.impactAnalyzer != nil {
@@ -232,11 +212,7 @@ func (m *MultiMonitor) Stop() {
 	m.running = false
 	close(m.stopCh)
 	m.stopCh = make(chan struct{}) // 重新创建 channel 以便下次启动
-	if m.logFile != nil {
-		m.logFile.Close()
-		m.logFile = nil
-	}
-	log.Printf("[INFO] MultiMonitor stopped")
+	logger.Info("MONITOR", "MultiMonitor stopped")
 }
 
 func (m *MultiMonitor) loop() {
@@ -303,7 +279,7 @@ func (m *MultiMonitor) collectOne(pid int32) {
 	m.mu.Unlock()
 
 	// 写入日志
-	m.writeLog(metric)
+	logger.Metric(metric)
 
 	// 检测进程退出事件
 	if !alive && !exitReported {
@@ -322,18 +298,9 @@ func (m *MultiMonitor) collectOne(pid int32) {
 	}
 }
 
-func (m *MultiMonitor) writeLog(v any) {
-	if m.logFile == nil {
-		return
-	}
-	data, _ := json.Marshal(v)
-	m.logFile.Write(append(data, '\n'))
-}
-
 func (m *MultiMonitor) addEvent(evt types.Event) {
 	m.eventsBuffer.Push(evt)
-	m.writeLog(evt)
-	log.Printf("[EVENT] %s: %s (pid=%d)", evt.Type, evt.Message, evt.PID)
+	logger.Event(evt.Type, evt.PID, evt.Name, evt.Message)
 }
 
 // AddImpactEvent 添加影响事件到事件日志
