@@ -31,6 +31,8 @@ func (cmd *LogCommand) Handle(subCmd string, args []string) {
 		cmd.filterLogs(args)
 	case "export", "exp":
 		cmd.exportLogs(args)
+	case "report", "rpt":
+		cmd.generateReport(args)
 	case "clear":
 		cmd.clearLogs()
 	case "files":
@@ -50,6 +52,7 @@ func (cmd *LogCommand) PrintHelp() {
 	fmt.Println("  tail [n]              - 查看最近N条日志 (默认50)")
 	fmt.Println("  filter <type>         - 按类型过滤 (METRIC/EVENT/IMPACT)")
 	fmt.Println("  export <file>         - 导出日志到文件")
+	fmt.Println("  report <file>         - 生成值班运行报告")
 	fmt.Println("  files                 - 列出所有日志文件")
 	fmt.Println("  clear                 - 清理旧日志文件")
 	fmt.Println()
@@ -57,6 +60,7 @@ func (cmd *LogCommand) PrintHelp() {
 	fmt.Println("  log tail 100          - 查看最近100条日志")
 	fmt.Println("  log filter IMPACT     - 仅显示影响分析日志")
 	fmt.Println("  log export report.txt - 导出日志到文件")
+	fmt.Println("  log report 日报.txt   - 生成电厂值班运行报告")
 }
 
 // LogEntry 日志条目结构
@@ -415,4 +419,184 @@ func (cmd *LogCommand) formatCategory(cat string) string {
 		}
 		return "[" + cat + "]"
 	}
+}
+
+// generateReport 生成电厂风格的值班运行报告
+func (cmd *LogCommand) generateReport(args []string) {
+	if len(args) == 0 {
+		fmt.Println(cmd.cli.formatter.Error("用法: log report <file>"))
+		fmt.Println(cmd.cli.formatter.Info("示例: log report 日报.txt"))
+		return
+	}
+
+	outputFile := args[0]
+	now := time.Now()
+
+	// 读取所有日志（最近24小时的）
+	allLogs := cmd.readRecentLogs(10000)
+
+	// 分类统计
+	var eventLogs, impactLogs []LogEntry
+	var startCount, exitCount, alertCount int
+	severityCount := map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+	for _, log := range allLogs {
+		switch strings.ToUpper(log.Category) {
+		case "EVENT":
+			eventLogs = append(eventLogs, log)
+			// 分析事件类型
+			msg := strings.ToLower(log.Message)
+			if strings.Contains(msg, "start") || strings.Contains(msg, "启动") {
+				startCount++
+			} else if strings.Contains(msg, "exit") || strings.Contains(msg, "退出") || strings.Contains(msg, "stop") {
+				exitCount++
+			}
+		case "IMPACT":
+			impactLogs = append(impactLogs, log)
+			// 提取严重级别
+			if sev, ok := log.Data["severity"]; ok {
+				if sevStr, ok := sev.(string); ok {
+					severityCount[strings.ToLower(sevStr)]++
+				}
+			} else {
+				severityCount["medium"]++
+			}
+		}
+	}
+
+	// 获取当前监控目标
+	targets := cmd.cli.monitor.GetTargets()
+
+	// 确定值次
+	hour := now.Hour()
+	var shift string
+	if hour >= 8 && hour < 20 {
+		shift = "白班 (08:00 - 20:00)"
+	} else {
+		shift = "夜班 (20:00 - 08:00)"
+	}
+
+	// 生成报告
+	file, err := os.Create(outputFile)
+	if err != nil {
+		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("创建文件失败: %v", err)))
+		return
+	}
+	defer file.Close()
+
+	w := bufio.NewWriter(file)
+	defer w.Flush()
+
+	// 报告头
+	w.WriteString("═══════════════════════════════════════════════════════════════\n")
+	w.WriteString("              电厂核心软件运行日报\n")
+	w.WriteString("═══════════════════════════════════════════════════════════════\n")
+	w.WriteString(fmt.Sprintf("单位名称：XX发电厂\n"))
+	w.WriteString(fmt.Sprintf("报告日期：%s\n", now.Format("2006-01-02")))
+	w.WriteString(fmt.Sprintf("值    次：%s\n", shift))
+	w.WriteString(fmt.Sprintf("生成时间：%s\n", now.Format("2006-01-02 15:04:05")))
+	w.WriteString("───────────────────────────────────────────────────────────────\n\n")
+
+	// 一、保障软件运行情况
+	w.WriteString("一、保障软件运行情况\n")
+	if len(targets) == 0 {
+		w.WriteString("  暂无保障对象\n")
+	} else {
+		w.WriteString(fmt.Sprintf("  %-6s %-20s %-8s %-10s %-10s %-10s\n",
+			"序号", "软件名称", "状态", "CPU均值", "内存均值", "运行时长"))
+		for i, t := range targets {
+			// 获取软件状态
+			status := "正常"
+			cpuAvg := "-"
+			memAvg := "-"
+			runtime := "-"
+
+			if metrics := cmd.cli.monitor.GetMetrics(t.PID, 100); len(metrics) > 0 {
+				// 计算平均值
+				var cpuSum, memSum float64
+				for _, m := range metrics {
+					cpuSum += m.CPUPct
+					memSum += float64(m.RSSBytes)
+				}
+				cpuAvg = fmt.Sprintf("%.1f%%", cpuSum/float64(len(metrics)))
+				memAvg = cmd.cli.formatter.FormatBytes(uint64(memSum / float64(len(metrics))))
+			}
+
+			displayName := t.Alias
+			if displayName == "" {
+				displayName = t.Name
+			}
+			if len(displayName) > 18 {
+				displayName = displayName[:18] + ".."
+			}
+
+			w.WriteString(fmt.Sprintf("  %-6d %-20s %-8s %-10s %-10s %-10s\n",
+				i+1, displayName, status, cpuAvg, memAvg, runtime))
+		}
+	}
+	w.WriteString("\n")
+
+	// 二、运行事件统计
+	w.WriteString("二、运行事件统计\n")
+	w.WriteString(fmt.Sprintf("  软件启动：%d 次\n", startCount))
+	w.WriteString(fmt.Sprintf("  软件退出：%d 次\n", exitCount))
+	w.WriteString(fmt.Sprintf("  异常告警：%d 次\n", alertCount))
+	w.WriteString("\n")
+
+	// 三、风险事件统计
+	w.WriteString("三、风险事件统计\n")
+	w.WriteString(fmt.Sprintf("  严重：%-4d 高级：%-4d 中级：%-4d 低级：%d\n",
+		severityCount["critical"],
+		severityCount["high"],
+		severityCount["medium"],
+		severityCount["low"]))
+	w.WriteString("\n")
+
+	// 四、详细事件记录
+	w.WriteString("四、详细事件记录\n")
+	if len(impactLogs) == 0 && len(eventLogs) == 0 {
+		w.WriteString("  （无）\n")
+	} else {
+		// 显示最近20条重要事件
+		count := 0
+		for _, log := range impactLogs {
+			if count >= 20 {
+				break
+			}
+			sev := "中级"
+			if s, ok := log.Data["severity"]; ok {
+				switch strings.ToLower(fmt.Sprintf("%v", s)) {
+				case "critical":
+					sev = "严重"
+				case "high":
+					sev = "高级"
+				case "medium":
+					sev = "中级"
+				case "low":
+					sev = "低级"
+				}
+			}
+			w.WriteString(fmt.Sprintf("  [%s] [%s] %s\n",
+				log.Timestamp.Format("15:04:05"),
+				sev,
+				log.Message))
+			count++
+		}
+	}
+	w.WriteString("\n")
+
+	// 五、值班备注
+	w.WriteString("五、值班备注\n")
+	w.WriteString("  （无）\n")
+	w.WriteString("\n")
+
+	// 报告尾
+	w.WriteString("───────────────────────────────────────────────────────────────\n")
+	w.WriteString("                    值班员签名：___________\n")
+	w.WriteString("═══════════════════════════════════════════════════════════════\n")
+
+	fmt.Println(cmd.cli.formatter.Success(fmt.Sprintf("已生成值班运行报告: %s", outputFile)))
+	fmt.Println(cmd.cli.formatter.Info(fmt.Sprintf("  保障软件: %d 个", len(targets))))
+	fmt.Println(cmd.cli.formatter.Info(fmt.Sprintf("  运行事件: %d 条", len(eventLogs))))
+	fmt.Println(cmd.cli.formatter.Info(fmt.Sprintf("  风险事件: %d 条", len(impactLogs))))
 }

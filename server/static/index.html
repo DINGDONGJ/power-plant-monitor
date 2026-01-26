@@ -424,11 +424,11 @@
         <div class="monitor-section">
             <div class="section-header">
                 <div class="section-title">
-                    <span>🛡 电力系统主进程守护</span>
-                    <span class="monitor-status running" id="monitorStatus">运行中</span>
+                    <span>🛡 厂站核心软件保障清单</span>
+                    <span class="monitor-status running" id="monitorStatus">保障中</span>
                 </div>
                 <div class="section-actions">
-                    <button class="btn danger" onclick="removeAllTargets()">全部移除</button>
+                    <button class="btn danger" onclick="removeAllTargets()">全部解除</button>
                 </div>
             </div>
             <div class="table-container monitor-table-container">
@@ -440,15 +440,15 @@
         </div>
         
         <div class="tabs">
-            <button class="tab active" onclick="showPanel('processes')">全进程列表</button>
-            <button class="tab" onclick="showPanel('impacts')">影响分析</button>
-            <button class="tab" onclick="showPanel('events')">事件日志</button>
+            <button class="tab active" onclick="showPanel('processes')">厂站软件列表</button>
+            <button class="tab" onclick="showPanel('impacts')">风险关联分析</button>
+            <button class="tab" onclick="showPanel('events')">运行事件</button>
         </div>
 
         <div id="processes" class="panel active">
             <div class="toolbar">
-                <input type="text" id="searchInput" placeholder="搜索进程..." oninput="filterProcesses()">
-                <button class="btn" onclick="addSelectedToMonitor()">+ 添加到监控</button>
+                <input type="text" id="searchInput" placeholder="搜索软件名/PID/用户..." oninput="filterProcesses()">
+                <button class="btn" onclick="addSelectedToMonitor()">+ 纳入保障</button>
                 <span class="stats">已选: <span id="selectedCount">0</span> | 总计: <span id="totalCount">0</span></span>
                 <span class="stats" style="margin-left:auto">拖动表头调整列顺序</span>
             </div>
@@ -485,7 +485,7 @@
                 <span class="stats" style="margin-left:auto" id="impactConfigInfo">CPU>80% | 内存>85% | 磁盘IO>100MB/s | 网络>100MB/s</span>
             </div>
             <div class="impact-list" id="impactList">
-                <div style="color:#666;padding:20px;text-align:center">暂无影响事件</div>
+                <div style="color:#666;padding:20px;text-align:center">暂无风险事件，厂站软件运行正常</div>
             </div>
         </div>
 
@@ -499,11 +499,11 @@
         <!-- 目标配置弹窗 -->
         <div class="modal-overlay" id="configModal">
             <div class="modal">
-                <h3>⚙ 监控配置 - <span id="configTargetName"></span></h3>
+                <h3>⚙ 保障配置 - <span id="configTargetName"></span></h3>
                 <input type="hidden" id="configPid">
                 <div class="modal-row">
                     <label>备注名称</label>
-                    <input type="text" id="configAlias" placeholder="例如: 电力监控主进程">
+                    <input type="text" id="configAlias" placeholder="例如: DCS操作员站、SIS数据库">
                 </div>
                 <div class="modal-buttons">
                     <button class="btn" onclick="closeConfigModal()">取消</button>
@@ -517,8 +517,8 @@
             <div class="modal" style="min-width:580px;max-height:90vh;overflow-y:auto">
                 <h3>⚙ 影响分析阈值配置</h3>
                 <div style="margin-bottom:12px;padding:8px;background:#002200;border-radius:4px">
-                    <div style="color:#0f0;font-size:13px;margin-bottom:4px">📊 系统级别阈值</div>
-                    <div style="color:#666;font-size:11px">当系统整体指标超过阈值时触发检测</div>
+                    <div style="color:#0f0;font-size:13px;margin-bottom:4px">📊 厂站级别阈值</div>
+                    <div style="color:#666;font-size:11px">当厂站服务器整体指标超过阈值时触发检测</div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                     <div class="modal-row">
@@ -539,8 +539,8 @@
                     </div>
                 </div>
                 <div style="margin:12px 0;padding:8px;background:#220022;border-radius:4px">
-                    <div style="color:#f0f;font-size:13px;margin-bottom:4px">🔍 进程级别阈值 <span style="color:#888;font-size:11px">(设为0禁用检测)</span></div>
-                    <div style="color:#666;font-size:11px">单个进程超过阈值即触发检测，无论系统整体如何</div>
+                    <div style="color:#f0f;font-size:13px;margin-bottom:4px">🔍 软件级别阈值 <span style="color:#888;font-size:11px">(设为0禁用检测)</span></div>
+                    <div style="color:#666;font-size:11px">单个软件超过阈值即触发检测，用于监控异常软件</div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                     <div class="modal-row">
@@ -643,10 +643,10 @@
         
         const allColumns = [
             { key: 'checkbox', title: '<input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll()">', sortable: false },
-            { key: 'name', title: '进程名称', sortable: true },
+            { key: 'name', title: '软件名称', sortable: true },
             { key: 'pid', title: 'PID', sortable: true },
             { key: 'status', title: '状态', sortable: true },
-            { key: 'username', title: '发布者', sortable: true },
+            { key: 'username', title: '运行账户', sortable: true },
             { key: 'cpu', title: 'CPU%', sortable: true },
             { key: 'mem', title: '内存', sortable: true },
             { key: 'memGrowth', title: '内存增速', sortable: true },
@@ -921,7 +921,7 @@
             return result;
         }
 
-        // 根据进程状态返回颜色
+        // 根据软件状态返回颜色
         function getStatusColor(status) {
             if (!status) return '#00ff00';
             const s = status.toLowerCase();
@@ -933,7 +933,7 @@
             if (s === 'idle' || s === 'i') return '#888888';
             // stop - 黄色（已停止）
             if (s === 'stop' || s === 'stopped' || s === 't') return '#ffff00';
-            // zombie - 红色（僵尸进程）
+            // zombie - 红色（僵尸状态）
             if (s === 'zombie' || s === 'z') return '#ff4444';
             // disk sleep - 橙色（等待IO）
             if (s === 'disk-sleep' || s === 'disk sleep' || s === 'd') return '#ff8800';
@@ -1270,7 +1270,7 @@
                 document.getElementById('totalCount').textContent = allProcesses.length;
                 renderProcesses(getFilteredProcesses());
             } catch (e) {
-                console.error('获取进程列表失败:', e);
+                console.error('获取软件列表失败:', e);
             }
         }
 
@@ -1400,7 +1400,7 @@
         function renderProcesses(processes) {
             const tbody = document.getElementById('processTable');
             
-            // 按进程名分组
+            // 按软件名分组
             const groups = {};
             processes.forEach(p => {
                 const name = p.name || '-';
@@ -1566,7 +1566,7 @@
         }
 
         async function addSelectedToMonitor() {
-            if (selectedPids.size === 0) return alert('请先选择要监控的进程');
+            if (selectedPids.size === 0) return alert('请先选择要纳入保障的软件');
             for (const pid of selectedPids) {
                 const proc = allProcesses.find(p => p.pid === pid);
                 await fetch('/api/monitor/add', {
@@ -1593,7 +1593,7 @@
                 const targets = await targetsRes.json();
                 const processes = await processesRes.json();
                 
-                // 将进程列表转换为以 PID 为 key 的 map
+                // 将软件列表转换为以 PID 为 key 的 map
                 const processMap = {};
                 processes.forEach(p => {
                     processMap[p.pid] = p;
@@ -1614,7 +1614,7 @@
             
             if (!targets || targets.length === 0) {
                 headerRow.innerHTML = '';
-                tbody.innerHTML = '<tr><td colspan="20" style="color:#666;text-align:center;padding:20px">暂无监控目标，请从进程列表添加</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="20" style="color:#666;text-align:center;padding:20px">暂无保障对象，请从厂站软件列表纳入</td></tr>';
                 return;
             }
             
@@ -1625,10 +1625,10 @@
                 monitoredPids.add(t.pid);
             });
             
-            // 使用与进程列表相同的列，但第一列改为操作列
+            // 使用与软件列表相同的列，但第一列改为操作列
             const visibleCols = getVisibleColumns();
             
-            // 渲染表头（与进程列表相同，但第一列是操作）
+            // 渲染表头（与软件列表相同，但第一列是操作）
             headerRow.innerHTML = visibleCols.map(key => {
                 const col = getColumnByKey(key);
                 if (!col) return '';
@@ -1645,7 +1645,7 @@
                 th.addEventListener('contextmenu', showColumnMenu);
             });
             
-            // 构建监控进程数据（合并 target 配置和进程信息）
+            // 构建保障软件数据（合并 target 配置和软件信息）
             let monitorData = targets.map(t => {
                 const p = processMap[t.pid];
                 return {
@@ -1798,7 +1798,7 @@
         }
 
         async function removeAllTargets() {
-            if (!confirm('确定要移除所有监控目标吗？')) return;
+            if (!confirm('确定要解除所有保障对象吗？')) return;
             await fetch('/api/monitor/removeAll', { method: 'POST' });
             refreshTargets();
         }
@@ -1832,9 +1832,9 @@
                 return;
             }
             const typeMap = {
-                exit: '退出',
-                new_process: '新进程',
-                process_gone: '进程消失',
+                exit: '软件退出',
+                new_process: '新软件启动',
+                process_gone: '软件消失',
                 impact_cpu: 'CPU影响',
                 impact_memory: '内存影响',
                 impact_mem_growth: '内存增速',
@@ -1953,7 +1953,7 @@
             
             const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
             
-            // 第一层：按进程名分组
+            // 第一层：按软件名分组
             const groupedByName = {};
             impacts.forEach(imp => {
                 const name = imp.source_name;
@@ -2014,7 +2014,7 @@
                 const pidCount = pidList.length;
                 const isExpanded = expandedImpactGroups.has(group.source_name);
                 
-                // 统计整个进程名的类型
+            // 统计整个软件名的类型
                 const typeCounts = {};
                 const affectedTargets = new Set();
                 group.allEvents.forEach(e => {
@@ -2101,7 +2101,7 @@
                             <span class="impact-expand-icon">${isExpanded ? '▼' : '▶'}</span>
                             <span class="impact-severity ${group.maxSeverity}">${severityNames[group.maxSeverity]}</span>
                             <span class="impact-source-name">${group.source_name}</span>
-                            <span class="impact-pid-count">${pidCount} 个进程</span>
+                            <span class="impact-pid-count">${pidCount} 个实例</span>
                             <span class="impact-event-count">${group.allEvents.length} 个事件</span>
                         </div>
                         <span class="impact-time">${new Date(group.latestTime).toLocaleString('zh-CN')}</span>
@@ -2154,7 +2154,7 @@
             document.getElementById('impactMemThreshold').value = c.memory_threshold || 85;
             document.getElementById('impactDiskThreshold').value = c.disk_io_threshold || 100;
             document.getElementById('impactNetThreshold').value = c.network_threshold || 100;
-            // 进程级别阈值
+            // 软件级别阈值
             document.getElementById('impactProcCpuThreshold').value = c.proc_cpu_threshold || 50;
             document.getElementById('impactProcMemThreshold').value = c.proc_memory_threshold || 1000;
             document.getElementById('impactProcMemGrowthThreshold').value = c.proc_mem_growth_threshold || 10;
@@ -2181,7 +2181,7 @@
                 memory_threshold: parseFloat(document.getElementById('impactMemThreshold').value) || 85,
                 disk_io_threshold: parseFloat(document.getElementById('impactDiskThreshold').value) || 100,
                 network_threshold: parseFloat(document.getElementById('impactNetThreshold').value) || 100,
-                // 进程级别阈值
+                // 软件级别阈值
                 proc_cpu_threshold: parseFloat(document.getElementById('impactProcCpuThreshold').value) || 0,
                 proc_memory_threshold: parseFloat(document.getElementById('impactProcMemThreshold').value) || 0,
                 proc_mem_growth_threshold: parseFloat(document.getElementById('impactProcMemGrowthThreshold').value) || 0,
