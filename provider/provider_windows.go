@@ -6,16 +6,22 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
-	modkernel32               = syscall.NewLazyDLL("kernel32.dll")
-	modpsapi                  = syscall.NewLazyDLL("psapi.dll")
-	procGetProcessHandleCount = modkernel32.NewProc("GetProcessHandleCount")
-	procOpenProcess           = modkernel32.NewProc("OpenProcess")
-	procCloseHandle           = modkernel32.NewProc("CloseHandle")
-	procGetProcessMemoryInfo  = modpsapi.NewProc("GetProcessMemoryInfo")
-	procGetPriorityClass      = modkernel32.NewProc("GetPriorityClass")
+	modkernel32                 = syscall.NewLazyDLL("kernel32.dll")
+	modpsapi                    = syscall.NewLazyDLL("psapi.dll")
+	modversion                  = syscall.NewLazyDLL("version.dll")
+	procGetProcessHandleCount   = modkernel32.NewProc("GetProcessHandleCount")
+	procOpenProcess             = modkernel32.NewProc("OpenProcess")
+	procCloseHandle             = modkernel32.NewProc("CloseHandle")
+	procGetProcessMemoryInfo    = modpsapi.NewProc("GetProcessMemoryInfo")
+	procGetPriorityClass        = modkernel32.NewProc("GetPriorityClass")
+	procGetFileVersionInfoW     = modversion.NewProc("GetFileVersionInfoW")
+	procGetFileVersionInfoSizeW = modversion.NewProc("GetFileVersionInfoSizeW")
+	procVerQueryValueW          = modversion.NewProc("VerQueryValueW")
 )
 
 const (
@@ -96,6 +102,88 @@ func getProcessPriority(pid int32) int32 {
 	}
 }
 
+// getFileDescription 获取可执行文件的描述信息
+func getFileDescription(exePath string) string {
+	if exePath == "" {
+		return ""
+	}
+
+	pathPtr, err := windows.UTF16PtrFromString(exePath)
+	if err != nil {
+		return ""
+	}
+
+	// 获取版本信息大小
+	size, _, _ := procGetFileVersionInfoSizeW.Call(
+		uintptr(unsafe.Pointer(pathPtr)),
+		0,
+	)
+	if size == 0 {
+		return ""
+	}
+
+	// 分配缓冲区并获取版本信息
+	data := make([]byte, size)
+	ret, _, _ := procGetFileVersionInfoW.Call(
+		uintptr(unsafe.Pointer(pathPtr)),
+		0,
+		size,
+		uintptr(unsafe.Pointer(&data[0])),
+	)
+	if ret == 0 {
+		return ""
+	}
+
+	// 查询语言和代码页
+	var langCodePage *uint32
+	var langLen uint32
+	subBlockPtr, _ := windows.UTF16PtrFromString(`\VarFileInfo\Translation`)
+	ret, _, _ = procVerQueryValueW.Call(
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(unsafe.Pointer(subBlockPtr)),
+		uintptr(unsafe.Pointer(&langCodePage)),
+		uintptr(unsafe.Pointer(&langLen)),
+	)
+
+	if ret == 0 || langLen == 0 {
+		// 尝试常见的语言代码页
+		return tryGetDescription(data, 0x040904B0) // 英文 Unicode
+	}
+
+	// 使用第一个语言代码页
+	langCP := *langCodePage
+	lang := uint16(langCP & 0xFFFF)
+	cp := uint16(langCP >> 16)
+	fullLangCP := (uint32(lang) << 16) | uint32(cp)
+
+	return tryGetDescription(data, fullLangCP)
+}
+
+func tryGetDescription(data []byte, langCP uint32) string {
+	lang := uint16(langCP >> 16)
+	cp := uint16(langCP & 0xFFFF)
+
+	// 构建查询路径
+	queryPath := fmt.Sprintf(`\StringFileInfo\%04x%04x\FileDescription`, lang, cp)
+	queryPtr, _ := windows.UTF16PtrFromString(queryPath)
+
+	var valuePtr *uint16
+	var valueLen uint32
+	ret, _, _ := procVerQueryValueW.Call(
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(unsafe.Pointer(queryPtr)),
+		uintptr(unsafe.Pointer(&valuePtr)),
+		uintptr(unsafe.Pointer(&valueLen)),
+	)
+
+	if ret == 0 || valueLen == 0 {
+		return ""
+	}
+
+	// 转换为 Go 字符串
+	return windows.UTF16PtrToString(valuePtr)
+}
+
 func New() ProcProvider {
 	return newCommonProvider(
 		// matchProcessName: Windows 需要匹配 .exe 后缀
@@ -110,5 +198,9 @@ func New() ProcProvider {
 		getProcessHandleCount,
 		// getPriority: Windows 使用 GetPriorityClass API
 		getProcessPriority,
+		// getFileDescription: Windows 使用版本信息 API 获取文件描述
+		getFileDescription,
+		// divideByNumCPU: Windows 风格，进程 CPU 最大 100%
+		true,
 	)
 }

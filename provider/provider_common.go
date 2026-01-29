@@ -5,14 +5,15 @@ import (
 	"sync"
 	"time"
 
+	"monitor-agent/netmon"
+	"monitor-agent/types"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	psnet "github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
-	"monitor-agent/netmon"
-	"monitor-agent/types"
 )
 
 // 磁盘 IO 采样状态
@@ -36,18 +37,36 @@ type rssSample struct {
 	growthRate float64
 }
 
+// 进程 CPU 采样状态
+type cpuSample struct {
+	cpuTime    float64 // 累计 CPU 时间（秒）
+	sampleTime time.Time
+	lastPct    float64 // 上次计算的 CPU 百分比
+}
+
 // 系统级采样状态
 type systemSample struct {
-	// CPU 详细指标
-	cpuUser   float64
-	cpuSystem float64
-	cpuIowait float64
-	cpuIdle   float64
-	cpuTotal  float64
+	// CPU 累计时间（用于增量计算）
+	cpuUser    float64
+	cpuSystem  float64
+	cpuIdle    float64
+	cpuIowait  float64
+	cpuNice    float64
+	cpuIrq     float64
+	cpuSoftirq float64
+	cpuSteal   float64
+	cpuTotal   float64 // 累计总时间
+
+	// CPU 百分比（计算结果）
+	cpuUserPct   float64
+	cpuSystemPct float64
+	cpuIdlePct   float64
+	cpuIowaitPct float64
+	cpuTotalPct  float64
 
 	// Swap 采样
-	swapIn     uint64
-	swapOut    uint64
+	swapIn      uint64
+	swapOut     uint64
 	swapInRate  float64
 	swapOutRate float64
 
@@ -71,6 +90,8 @@ type commonProvider struct {
 	ioSamples    map[int32]*ioSample
 	rssSamplesMu sync.RWMutex
 	rssSamples   map[int32]*rssSample
+	cpuSamplesMu sync.RWMutex
+	cpuSamples   map[int32]*cpuSample
 
 	// 系统级采样缓存
 	sysSampleMu sync.RWMutex
@@ -79,30 +100,53 @@ type commonProvider struct {
 	// 进程网络监控
 	netMonitor *netmon.NetMonitor
 
+	// CPU 核心数（用于计算进程 CPU 百分比）
+	numCPU int
+
+	// 是否将进程 CPU 除以核心数（Windows 风格 = true，Linux 风格 = false）
+	divideByNumCPU bool
+
 	// 平台特定函数
-	matchProcessName func(procName, targetName string) bool
-	formatCmdline    func(exe string) string
-	getHandleCount   func(pid int32) int32
-	getPriority      func(pid int32) int32
+	matchProcessName   func(procName, targetName string) bool
+	formatCmdline      func(exe string) string
+	getHandleCount     func(pid int32) int32
+	getPriority        func(pid int32) int32
+	getFileDescription func(exePath string) string
 }
 
 // newCommonProvider 创建通用 provider
+// divideByNumCPU: Windows 风格设为 true（进程CPU最大100%），Linux 风格设为 false（单核100%，可超过100%）
 func newCommonProvider(
 	matchName func(procName, targetName string) bool,
 	fmtCmdline func(exe string) string,
 	getHandles func(pid int32) int32,
 	getPrio func(pid int32) int32,
+	getFileDesc func(exePath string) string,
+	divideByNumCPU bool,
 ) *commonProvider {
-	p := &commonProvider{
-		ioSamples:        make(map[int32]*ioSample),
-		rssSamples:       make(map[int32]*rssSample),
-		sysSample:        &systemSample{sampleTime: time.Now()},
-		matchProcessName: matchName,
-		formatCmdline:    fmtCmdline,
-		getHandleCount:   getHandles,
-		getPriority:      getPrio,
-		netMonitor:       netmon.New(),
+	numCPU, _ := cpu.Counts(true)
+	if numCPU == 0 {
+		numCPU = 1
 	}
+
+	p := &commonProvider{
+		ioSamples:          make(map[int32]*ioSample),
+		rssSamples:         make(map[int32]*rssSample),
+		cpuSamples:         make(map[int32]*cpuSample),
+		sysSample:          &systemSample{sampleTime: time.Now()},
+		numCPU:             numCPU,
+		divideByNumCPU:     divideByNumCPU,
+		matchProcessName:   matchName,
+		formatCmdline:      fmtCmdline,
+		getHandleCount:     getHandles,
+		getPriority:        getPrio,
+		getFileDescription: getFileDesc,
+		netMonitor:         netmon.New(),
+	}
+
+	// 初始化系统 CPU 采样
+	p.initSystemCPUSample()
+
 	go p.sampleSystemMetrics()
 
 	// 启动进程网络监控
@@ -113,6 +157,28 @@ func newCommonProvider(
 	return p
 }
 
+// initSystemCPUSample 初始化系统 CPU 采样基准值
+func (p *commonProvider) initSystemCPUSample() {
+	cpuTimes, err := cpu.Times(false)
+	if err != nil || len(cpuTimes) == 0 {
+		return
+	}
+
+	t := cpuTimes[0]
+	p.sysSampleMu.Lock()
+	p.sysSample.cpuUser = t.User
+	p.sysSample.cpuSystem = t.System
+	p.sysSample.cpuIdle = t.Idle
+	p.sysSample.cpuIowait = t.Iowait
+	p.sysSample.cpuNice = t.Nice
+	p.sysSample.cpuIrq = t.Irq
+	p.sysSample.cpuSoftirq = t.Softirq
+	p.sysSample.cpuSteal = t.Steal
+	p.sysSample.cpuTotal = t.User + t.System + t.Idle + t.Nice + t.Iowait + t.Irq + t.Softirq + t.Steal
+	p.sysSample.sampleTime = time.Now()
+	p.sysSampleMu.Unlock()
+}
+
 // sampleSystemMetrics 后台定时采集系统指标
 func (p *commonProvider) sampleSystemMetrics() {
 	ticker := time.NewTicker(time.Second)
@@ -120,6 +186,21 @@ func (p *commonProvider) sampleSystemMetrics() {
 
 	for range ticker.C {
 		p.collectSystemSample()
+		p.warmupProcessCPU() // 预热所有进程的 CPU 采样缓存
+	}
+}
+
+// warmupProcessCPU 预热所有进程的 CPU 采样缓存
+// 这样 CLI/Web 显示时能读取到准确的 CPU 值，而不是首次采样返回 0
+func (p *commonProvider) warmupProcessCPU() {
+	procs, err := process.Processes()
+	if err != nil {
+		return
+	}
+
+	for _, proc := range procs {
+		// 只调用 calcProcessCPU 来更新缓存，不使用返回值
+		p.calcProcessCPU(proc.Pid, proc)
 	}
 }
 
@@ -127,20 +208,8 @@ func (p *commonProvider) sampleSystemMetrics() {
 func (p *commonProvider) collectSystemSample() {
 	now := time.Now()
 
-	// CPU 详细指标
-	cpuTimes, _ := cpu.Times(false) // false = 合并所有 CPU
-	var cpuUser, cpuSystem, cpuIowait, cpuIdle, cpuTotal float64
-	if len(cpuTimes) > 0 {
-		t := cpuTimes[0]
-		total := t.User + t.System + t.Idle + t.Nice + t.Iowait + t.Irq + t.Softirq + t.Steal
-		if total > 0 {
-			cpuUser = t.User / total * 100
-			cpuSystem = t.System / total * 100
-			cpuIowait = t.Iowait / total * 100
-			cpuIdle = t.Idle / total * 100
-			cpuTotal = 100 - cpuIdle
-		}
-	}
+	// CPU 时间采样
+	cpuTimes, _ := cpu.Times(false)
 
 	// Swap 指标
 	swapInfo, _ := mem.SwapMemory()
@@ -166,6 +235,37 @@ func (p *commonProvider) collectSystemSample() {
 
 	deltaTime := now.Sub(p.sysSample.sampleTime).Seconds()
 	if deltaTime > 0.1 {
+		// CPU 增量计算
+		if len(cpuTimes) > 0 {
+			t := cpuTimes[0]
+			currentTotal := t.User + t.System + t.Idle + t.Nice + t.Iowait + t.Irq + t.Softirq + t.Steal
+
+			deltaTotal := currentTotal - p.sysSample.cpuTotal
+			if deltaTotal > 0 {
+				deltaUser := t.User - p.sysSample.cpuUser
+				deltaSystem := t.System - p.sysSample.cpuSystem
+				deltaIdle := t.Idle - p.sysSample.cpuIdle
+				deltaIowait := t.Iowait - p.sysSample.cpuIowait
+
+				p.sysSample.cpuUserPct = deltaUser / deltaTotal * 100
+				p.sysSample.cpuSystemPct = deltaSystem / deltaTotal * 100
+				p.sysSample.cpuIdlePct = deltaIdle / deltaTotal * 100
+				p.sysSample.cpuIowaitPct = deltaIowait / deltaTotal * 100
+				p.sysSample.cpuTotalPct = 100 - p.sysSample.cpuIdlePct
+			}
+
+			// 更新累计值
+			p.sysSample.cpuUser = t.User
+			p.sysSample.cpuSystem = t.System
+			p.sysSample.cpuIdle = t.Idle
+			p.sysSample.cpuIowait = t.Iowait
+			p.sysSample.cpuNice = t.Nice
+			p.sysSample.cpuIrq = t.Irq
+			p.sysSample.cpuSoftirq = t.Softirq
+			p.sysSample.cpuSteal = t.Steal
+			p.sysSample.cpuTotal = currentTotal
+		}
+
 		// Swap 速率
 		p.sysSample.swapInRate = float64(swapIn-p.sysSample.swapIn) / deltaTime
 		p.sysSample.swapOutRate = float64(swapOut-p.sysSample.swapOut) / deltaTime
@@ -178,11 +278,6 @@ func (p *commonProvider) collectSystemSample() {
 	}
 
 	// 更新采样值
-	p.sysSample.cpuUser = cpuUser
-	p.sysSample.cpuSystem = cpuSystem
-	p.sysSample.cpuIowait = cpuIowait
-	p.sysSample.cpuIdle = cpuIdle
-	p.sysSample.cpuTotal = cpuTotal
 	p.sysSample.swapIn = swapIn
 	p.sysSample.swapOut = swapOut
 	p.sysSample.diskReadBytes = diskReadBytes
@@ -226,7 +321,7 @@ func (p *commonProvider) GetMetrics(pid int32) (*types.ProcessMetrics, error) {
 	if err != nil {
 		return nil, err
 	}
-	cpuPct, _ := proc.CPUPercent()
+	cpuPct := p.calcProcessCPU(pid, proc)
 	memInfo, _ := proc.MemoryInfo()
 	name, _ := proc.Name()
 
@@ -325,6 +420,53 @@ func (p *commonProvider) calcRSSGrowth(pid int32, rss uint64) float64 {
 	return growthRate
 }
 
+// calcProcessCPU 计算进程 CPU 使用率（增量方式）
+func (p *commonProvider) calcProcessCPU(pid int32, proc *process.Process) float64 {
+	now := time.Now()
+
+	// 获取进程 CPU 时间
+	times, err := proc.Times()
+	if err != nil {
+		return 0
+	}
+	currentCPUTime := times.User + times.System
+
+	p.cpuSamplesMu.Lock()
+	defer p.cpuSamplesMu.Unlock()
+
+	sample, exists := p.cpuSamples[pid]
+	if !exists {
+		p.cpuSamples[pid] = &cpuSample{
+			cpuTime:    currentCPUTime,
+			sampleTime: now,
+			lastPct:    0,
+		}
+		return 0
+	}
+
+	deltaTime := now.Sub(sample.sampleTime).Seconds()
+	if deltaTime < 0.1 {
+		return sample.lastPct
+	}
+
+	// 计算 CPU 百分比：(CPU时间增量 / 实际时间增量) * 100
+	deltaCPU := currentCPUTime - sample.cpuTime
+	cpuPct := (deltaCPU / deltaTime) * 100
+
+	// Windows 风格：除以核心数，最大 100%
+	// Linux 风格：不除，单核 100%，多核可超过 100%
+	if p.divideByNumCPU && p.numCPU > 0 {
+		cpuPct = cpuPct / float64(p.numCPU)
+	}
+
+	// 更新采样
+	sample.cpuTime = currentCPUTime
+	sample.sampleTime = now
+	sample.lastPct = cpuPct
+
+	return cpuPct
+}
+
 func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 	procs, err := process.Processes()
 	if err != nil {
@@ -341,13 +483,15 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		alivePids[proc.Pid] = true
 
 		name, _ := proc.Name()
-		cpuPct, _ := proc.CPUPercent()
 		memInfo, _ := proc.MemoryInfo()
 		status, _ := proc.Status()
 		username, _ := proc.Username()
 		cmdline, _ := proc.Cmdline()
 		ioCounters, _ := proc.IOCounters()
 		createTime, _ := proc.CreateTime()
+
+		// 使用增量方式计算进程 CPU
+		cpuPct := p.calcProcessCPU(proc.Pid, proc)
 
 		// 获取句柄数/文件描述符数
 		var numFDs int32
@@ -374,11 +518,20 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			}
 		}
 
+		// 获取可执行文件路径
+		exePath, _ := proc.Exe()
+
 		// 如果 cmdline 为空，尝试获取可执行文件路径
 		if cmdline == "" {
-			if exe, err := proc.Exe(); err == nil && exe != "" {
-				cmdline = p.formatCmdline(exe)
+			if exePath != "" {
+				cmdline = p.formatCmdline(exePath)
 			}
+		}
+
+		// 获取文件描述信息
+		var description string
+		if p.getFileDescription != nil && exePath != "" {
+			description = p.getFileDescription(exePath)
 		}
 
 		var rss, vms uint64
@@ -450,6 +603,7 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 			NetSendRate:   netSendRate,
 			Uptime:        uptime,
 			Cmdline:       cmdline,
+			Description:   description,
 			OpenFiles:     openFiles,
 			ListenPorts:   ports,
 		})
@@ -471,6 +625,14 @@ func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
 		}
 	}
 	p.rssSamplesMu.Unlock()
+
+	p.cpuSamplesMu.Lock()
+	for pid := range p.cpuSamples {
+		if !alivePids[pid] {
+			delete(p.cpuSamples, pid)
+		}
+	}
+	p.cpuSamplesMu.Unlock()
 
 	return result, nil
 }
@@ -509,11 +671,11 @@ func (p *commonProvider) GetSystemMetrics() (*types.SystemMetrics, error) {
 
 	// 获取缓存的系统采样
 	p.sysSampleMu.RLock()
-	cpuTotal := p.sysSample.cpuTotal
-	cpuUser := p.sysSample.cpuUser
-	cpuSystem := p.sysSample.cpuSystem
-	cpuIowait := p.sysSample.cpuIowait
-	cpuIdle := p.sysSample.cpuIdle
+	cpuTotal := p.sysSample.cpuTotalPct
+	cpuUser := p.sysSample.cpuUserPct
+	cpuSystem := p.sysSample.cpuSystemPct
+	cpuIowait := p.sysSample.cpuIowaitPct
+	cpuIdle := p.sysSample.cpuIdlePct
 	swapInRate := p.sysSample.swapInRate
 	swapOutRate := p.sysSample.swapOutRate
 	diskReadRate := p.sysSample.diskReadRate

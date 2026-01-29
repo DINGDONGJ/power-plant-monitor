@@ -13,15 +13,15 @@ import (
 // LogEntry 统一日志条目
 type LogEntry struct {
 	Timestamp time.Time   `json:"timestamp"`
-	Level     string      `json:"level"`     // INFO, WARN, ERROR, DEBUG
-	Category  string      `json:"category"`  // SERVICE, EVENT, IMPACT, METRIC
+	Level     string      `json:"level"`    // INFO, WARN, ERROR, DEBUG
+	Category  string      `json:"category"` // SERVICE, EVENT, IMPACT, METRIC
 	Message   string      `json:"message"`
 	Data      interface{} `json:"data,omitempty"` // 可选的附加数据
 }
 
 // Logger 统一日志器
 type Logger struct {
-	mu            sync.Mutex
+	mu            sync.RWMutex
 	logFile       *os.File
 	logDir        string
 	consoleOutput bool
@@ -213,6 +213,20 @@ func (l *Logger) GetLogDir() string {
 	return l.logDir
 }
 
+// SetConsoleOutput 动态启停终端输出
+func (l *Logger) SetConsoleOutput(enabled bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.consoleOutput = enabled
+}
+
+// IsConsoleOutputEnabled 检查终端输出是否启用
+func (l *Logger) IsConsoleOutputEnabled() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.consoleOutput
+}
+
 // GetWriter 获取日志写入器（用于兼容标准log包）
 func (l *Logger) GetWriter() io.Writer {
 	return &logWriter{logger: l}
@@ -308,4 +322,19 @@ func Close() {
 	if defaultLogger != nil {
 		defaultLogger.Close()
 	}
+}
+
+// SetConsoleOutput 全局设置终端输出
+func SetConsoleOutput(enabled bool) {
+	if defaultLogger != nil {
+		defaultLogger.SetConsoleOutput(enabled)
+	}
+}
+
+// IsConsoleOutputEnabled 全局检查终端输出状态
+func IsConsoleOutputEnabled() bool {
+	if defaultLogger != nil {
+		return defaultLogger.IsConsoleOutputEnabled()
+	}
+	return false
 }

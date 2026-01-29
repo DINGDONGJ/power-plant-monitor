@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"monitor-agent/logger"
 )
 
 // LogCommand 日志管理命令组
@@ -33,6 +35,8 @@ func (cmd *LogCommand) Handle(subCmd string, args []string) {
 		cmd.exportLogs(args)
 	case "report", "rpt":
 		cmd.generateReport(args)
+	case "console", "con":
+		cmd.toggleConsole(args)
 	case "clear":
 		cmd.clearLogs()
 	case "files":
@@ -49,6 +53,7 @@ func (cmd *LogCommand) Handle(subCmd string, args []string) {
 func (cmd *LogCommand) PrintHelp() {
 	fmt.Println(cmd.cli.formatter.Header("\n=== 日志管理命令 (log) ==="))
 	fmt.Println()
+	fmt.Println("  console [on|off]      - 启停终端日志输出")
 	fmt.Println("  tail [n]              - 查看最近N条日志 (默认50)")
 	fmt.Println("  filter <type>         - 按类型过滤 (METRIC/EVENT/IMPACT)")
 	fmt.Println("  export <file>         - 导出日志到文件")
@@ -57,6 +62,8 @@ func (cmd *LogCommand) PrintHelp() {
 	fmt.Println("  clear                 - 清理旧日志文件")
 	fmt.Println()
 	fmt.Println(cmd.cli.formatter.Info("示例:"))
+	fmt.Println("  log console off       - 关闭终端日志输出")
+	fmt.Println("  log console on        - 开启终端日志输出")
 	fmt.Println("  log tail 100          - 查看最近100条日志")
 	fmt.Println("  log filter IMPACT     - 仅显示影响分析日志")
 	fmt.Println("  log export report.txt - 导出日志到文件")
@@ -72,6 +79,32 @@ type LogEntry struct {
 	Data        map[string]interface{} `json:"data,omitempty"`
 	ProcessName string                 `json:"process_name,omitempty"`
 	PID         int32                  `json:"pid,omitempty"`
+}
+
+// toggleConsole 启停终端日志输出
+func (cmd *LogCommand) toggleConsole(args []string) {
+	if len(args) == 0 {
+		// 显示当前状态
+		if logger.IsConsoleOutputEnabled() {
+			fmt.Println(cmd.cli.formatter.Info("终端日志输出: 开启"))
+			fmt.Println(cmd.cli.formatter.Info("输入 'log console off' 关闭"))
+		} else {
+			fmt.Println(cmd.cli.formatter.Info("终端日志输出: 关闭"))
+			fmt.Println(cmd.cli.formatter.Info("输入 'log console on' 开启"))
+		}
+		return
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "on", "1", "true", "开启":
+		logger.SetConsoleOutput(true)
+		fmt.Println(cmd.cli.formatter.Success("已开启终端日志输出"))
+	case "off", "0", "false", "关闭":
+		logger.SetConsoleOutput(false)
+		fmt.Println(cmd.cli.formatter.Success("已关闭终端日志输出"))
+	default:
+		fmt.Println(cmd.cli.formatter.Error("用法: log console [on|off]"))
+	}
 }
 
 func (cmd *LogCommand) tailLogs(args []string) {

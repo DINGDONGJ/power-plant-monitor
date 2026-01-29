@@ -16,5 +16,9 @@ func New() ProcProvider {
 		nil,
 		// getPriority: Linux 使用 gopsutil 的 Nice (返回 nil 使用默认实现)
 		nil,
+		// getFileDescription: Linux 没有类似 Windows 的文件描述
+		nil,
+		// divideByNumCPU: Linux 风格，单核 100%，可超过 100%
+		false,
 	)
 }

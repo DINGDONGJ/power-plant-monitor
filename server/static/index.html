@@ -661,7 +661,7 @@
             { key: 'netRecv', title: '网络收', sortable: true },
             { key: 'netSend', title: '网络发', sortable: true },
             { key: 'uptime', title: '已运行', sortable: true },
-            { key: 'cmdline', title: '命令行', sortable: false }
+            { key: 'cmdline', title: '描述', sortable: false }
         ];
         
         // 列宽度（从 localStorage 加载或使用默认）
@@ -1252,7 +1252,8 @@
                     (p.name && p.name.toLowerCase().includes(keyword)) || 
                     String(p.pid).includes(keyword) ||
                     (p.username && p.username.toLowerCase().includes(keyword)) ||
-                    (p.cmdline && p.cmdline.toLowerCase().includes(keyword))
+                    (p.cmdline && p.cmdline.toLowerCase().includes(keyword)) ||
+                    (p.description && p.description.toLowerCase().includes(keyword))
                 );
             }
             return filtered;
@@ -1391,7 +1392,7 @@
                     case 'netRecv': return formatDiskRate(p.net_recv_rate || 0);
                     case 'netSend': return formatDiskRate(p.net_send_rate || 0);
                     case 'uptime': return `<span style="color:#ccc">${formatUptime(p.uptime || 0)}</span>`;
-                    case 'cmdline': return `<span class="cmdline" style="color:#ccc" title="${(p.cmdline || '').replace(/"/g, '&quot;')}">${p.cmdline || '-'}</span>`;
+                    case 'cmdline': return `<span class="cmdline" style="color:#ccc" title="${(p.description || p.cmdline || '').replace(/"/g, '&quot;')}">${p.description || p.cmdline || '-'}</span>`;
                     default: return '-';
                 }
             }
@@ -1738,7 +1739,7 @@
                 case 'netRecv': return p ? formatDiskRate(p.net_recv_rate || 0) : '-';
                 case 'netSend': return p ? formatDiskRate(p.net_send_rate || 0) : '-';
                 case 'uptime': return `<span style="color:#ccc">${p ? formatUptime(p.uptime || 0) : '-'}</span>`;
-                case 'cmdline': return `<span class="cmdline" style="color:#ccc" title="${(item.cmdline || '').replace(/"/g, '&quot;')}">${item.cmdline || '-'}</span>`;
+                case 'cmdline': return `<span class="cmdline" style="color:#ccc" title="${(item.description || item.cmdline || '').replace(/"/g, '&quot;')}">${item.description || item.cmdline || '-'}</span>`;
                 default: return '-';
             }
         }

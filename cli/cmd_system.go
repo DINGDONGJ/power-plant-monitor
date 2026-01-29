@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shirou/gopsutil/v3/cpu"
+	"monitor-agent/types"
+
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -29,7 +30,7 @@ func NewSystemCommand(c *CLI) *SystemCommand {
 func (cmd *SystemCommand) Handle(subCmd string, args []string) {
 	switch subCmd {
 	case "status", "stat", "":
-		cmd.showStatus()
+		cmd.showStatus(args)
 	case "top":
 		cmd.showTopProcesses(args)
 	case "ps":
@@ -50,21 +51,78 @@ func (cmd *SystemCommand) Handle(subCmd string, args []string) {
 func (cmd *SystemCommand) PrintHelp() {
 	fmt.Println(cmd.cli.formatter.Header("\n=== 系统信息命令 (system) ==="))
 	fmt.Println()
-	fmt.Println("  status                - 显示系统整体状态")
-	fmt.Println("  top [n]               - 显示Top N进程 (默认10)")
+	fmt.Println("  status [-1]           - 显示系统状态 (默认动态刷新, -1 只显示一次)")
+	fmt.Println("  top [n] [-1]          - 显示Top N进程 (默认动态刷新, -1 只显示一次)")
 	fmt.Println("  ps [pattern]          - 列出进程 (可按名称过滤)")
 	fmt.Println("  events [n]            - 显示最近事件 (默认20)")
 	fmt.Println("  watch <pid>           - 实时监控指定进程")
 	fmt.Println()
 	fmt.Println(cmd.cli.formatter.Info("示例:"))
-	fmt.Println("  system top 20         - 显示CPU占用最高的20个进程")
+	fmt.Println("  system top 20         - 动态刷新显示Top 20进程")
+	fmt.Println("  system top 10 -1      - 只显示一次Top 10进程")
 	fmt.Println("  system ps java        - 列出名称包含java的进程")
 	fmt.Println("  system watch 1234     - 实时监控PID为1234的进程")
 }
 
-func (cmd *SystemCommand) showStatus() {
+func (cmd *SystemCommand) showStatus(args []string) {
+	// 检查是否只显示一次
+	onceMode := false
+	for _, arg := range args {
+		if arg == "-1" || arg == "once" {
+			onceMode = true
+		}
+	}
+
+	if onceMode {
+		cmd.renderStatus()
+		return
+	}
+
+	// 默认动态刷新
+	fmt.Println(cmd.cli.formatter.Info("动态监控模式，按 Enter 键退出..."))
+
+	stopChan := make(chan struct{})
+	go func() {
+		cmd.cli.scanner.Scan()
+		close(stopChan)
+	}()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	cmd.renderStatusWatch()
+
+	for {
+		select {
+		case <-stopChan:
+			fmt.Println(cmd.cli.formatter.Info("\n已退出动态监控"))
+			return
+		case <-ticker.C:
+			cmd.renderStatusWatch()
+		}
+	}
+}
+
+func (cmd *SystemCommand) renderStatusWatch() {
+	fmt.Print("\033[H\033[J")
+	now := time.Now().Format("15:04:05")
+	fmt.Printf("=== 系统状态 === [%s] 按 Enter 退出\n\n", now)
+	cmd.renderStatusContent()
+}
+
+func (cmd *SystemCommand) renderStatus() {
 	fmt.Println(cmd.cli.formatter.Header("\n=== 系统状态 ==="))
 	fmt.Println()
+	cmd.renderStatusContent()
+}
+
+func (cmd *SystemCommand) renderStatusContent() {
+	// 使用 monitor.GetSystemMetrics()，与 Web 数据源一致
+	sysMetrics, err := cmd.cli.monitor.GetSystemMetrics()
+	if err != nil {
+		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("获取系统指标失败: %v", err)))
+		return
+	}
 
 	// 主机信息
 	if info, err := host.Info(); err == nil {
@@ -80,39 +138,74 @@ func (cmd *SystemCommand) showStatus() {
 	// CPU信息
 	fmt.Println(cmd.cli.formatter.Bold("CPU:"))
 	fmt.Printf("  逻辑核心:   %d\n", runtime.NumCPU())
-	if cpuPercent, err := cpu.Percent(time.Second, false); err == nil && len(cpuPercent) > 0 {
-		pct := cpuPercent[0]
-		bar := cmd.cli.formatter.ProgressBar(pct, 30)
-		fmt.Printf("  使用率:     %s %s\n", bar, cmd.cli.formatter.FormatPercent(pct))
+	bar := cmd.cli.formatter.ProgressBar(sysMetrics.CPUPercent, 30)
+	fmt.Printf("  总使用率:   %s %s\n", bar, cmd.cli.formatter.FormatPercent(sysMetrics.CPUPercent))
+	fmt.Printf("  用户态:     %.1f%%    内核态: %.1f%%    IO等待: %.1f%%    空闲: %.1f%%\n",
+		sysMetrics.CPUUser, sysMetrics.CPUSystem, sysMetrics.CPUIowait, sysMetrics.CPUIdle)
+	if sysMetrics.LoadAvg1 > 0 || sysMetrics.LoadAvg5 > 0 || sysMetrics.LoadAvg15 > 0 {
+		fmt.Printf("  系统负载:   %.2f / %.2f / %.2f (1/5/15分钟)\n",
+			sysMetrics.LoadAvg1, sysMetrics.LoadAvg5, sysMetrics.LoadAvg15)
 	}
 	fmt.Println()
 
 	// 内存信息
 	fmt.Println(cmd.cli.formatter.Bold("内存:"))
-	if memInfo, err := mem.VirtualMemory(); err == nil {
-		bar := cmd.cli.formatter.ProgressBar(memInfo.UsedPercent, 30)
-		fmt.Printf("  总量:       %s\n", cmd.cli.formatter.FormatBytes(memInfo.Total))
-		fmt.Printf("  已用:       %s\n", cmd.cli.formatter.FormatBytes(memInfo.Used))
-		fmt.Printf("  可用:       %s\n", cmd.cli.formatter.FormatBytes(memInfo.Available))
-		fmt.Printf("  使用率:     %s %s\n", bar, cmd.cli.formatter.FormatPercent(memInfo.UsedPercent))
-	}
+	memBar := cmd.cli.formatter.ProgressBar(sysMetrics.MemoryPercent, 30)
+	fmt.Printf("  总量:       %s\n", FormatBytes(sysMetrics.MemoryTotal))
+	fmt.Printf("  已用:       %s\n", FormatBytes(sysMetrics.MemoryUsed))
+	fmt.Printf("  可用:       %s\n", FormatBytes(sysMetrics.MemoryAvailable))
+	fmt.Printf("  使用率:     %s %s\n", memBar, cmd.cli.formatter.FormatPercent(sysMetrics.MemoryPercent))
 	fmt.Println()
 
-	// 磁盘信息
-	fmt.Println(cmd.cli.formatter.Bold("磁盘:"))
+	// Swap信息
+	if sysMetrics.SwapTotal > 0 {
+		fmt.Println(cmd.cli.formatter.Bold("Swap:"))
+		swapBar := cmd.cli.formatter.ProgressBar(sysMetrics.SwapPercent, 30)
+		fmt.Printf("  总量:       %s\n", FormatBytes(sysMetrics.SwapTotal))
+		fmt.Printf("  已用:       %s\n", FormatBytes(sysMetrics.SwapUsed))
+		fmt.Printf("  使用率:     %s %s\n", swapBar, cmd.cli.formatter.FormatPercent(sysMetrics.SwapPercent))
+		if sysMetrics.SwapInRate > 0 || sysMetrics.SwapOutRate > 0 {
+			fmt.Printf("  换入/换出:  %s/s / %s/s\n",
+				FormatBytes(uint64(sysMetrics.SwapInRate)), FormatBytes(uint64(sysMetrics.SwapOutRate)))
+		}
+		fmt.Println()
+	}
+
+	// 网络流量
+	fmt.Println(cmd.cli.formatter.Bold("网络流量:"))
+	fmt.Printf("  接收速率:   %s/s\n", FormatBytes(uint64(sysMetrics.NetRecvRate)))
+	fmt.Printf("  发送速率:   %s/s\n", FormatBytes(uint64(sysMetrics.NetSendRate)))
+	fmt.Printf("  累计接收:   %s\n", FormatBytes(sysMetrics.NetBytesRecv))
+	fmt.Printf("  累计发送:   %s\n", FormatBytes(sysMetrics.NetBytesSent))
+	fmt.Println()
+
+	// 磁盘IO
+	fmt.Println(cmd.cli.formatter.Bold("磁盘IO:"))
+	fmt.Printf("  读取速率:   %s/s    IOPS: %.0f\n", FormatBytes(uint64(sysMetrics.DiskReadRate)), sysMetrics.DiskReadOps)
+	fmt.Printf("  写入速率:   %s/s    IOPS: %.0f\n", FormatBytes(uint64(sysMetrics.DiskWriteRate)), sysMetrics.DiskWriteOps)
+	fmt.Println()
+
+	// 磁盘空间
+	fmt.Println(cmd.cli.formatter.Bold("磁盘空间:"))
 	if partitions, err := disk.Partitions(false); err == nil {
 		for _, p := range partitions {
 			if usage, err := disk.Usage(p.Mountpoint); err == nil {
-				bar := cmd.cli.formatter.ProgressBar(usage.UsedPercent, 20)
+				diskBar := cmd.cli.formatter.ProgressBar(usage.UsedPercent, 20)
 				fmt.Printf("  %-10s %s %s / %s (%s)\n",
 					p.Mountpoint,
-					bar,
+					diskBar,
 					cmd.cli.formatter.FormatBytes(usage.Used),
 					cmd.cli.formatter.FormatBytes(usage.Total),
 					cmd.cli.formatter.FormatPercent(usage.UsedPercent))
 			}
 		}
 	}
+	fmt.Println()
+
+	// 进程统计
+	fmt.Println(cmd.cli.formatter.Bold("进程统计:"))
+	fmt.Printf("  进程总数:   %d\n", sysMetrics.ProcessCount)
+	fmt.Printf("  线程总数:   %d\n", sysMetrics.ThreadCount)
 	fmt.Println()
 
 	// 监控状态
@@ -141,73 +234,133 @@ func (cmd *SystemCommand) formatUptime(d time.Duration) string {
 
 func (cmd *SystemCommand) showTopProcesses(args []string) {
 	count := 10
-	if len(args) > 0 {
-		if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
+	onceMode := false
+
+	// 解析参数
+	for _, arg := range args {
+		if arg == "-1" || arg == "once" || arg == "-once" {
+			onceMode = true
+		} else if n, err := strconv.Atoi(arg); err == nil && n > 0 {
 			count = n
 		}
 	}
 
-	fmt.Println(cmd.cli.formatter.Header(fmt.Sprintf("\n=== Top %d 进程 (按CPU排序) ===", count)))
-	fmt.Println()
-
-	procs, err := process.Processes()
-	if err != nil {
-		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("获取进程列表失败: %v", err)))
+	if onceMode {
+		cmd.showTopProcessesOnce(count)
 		return
 	}
 
-	type procInfo struct {
-		pid     int32
-		name    string
-		cpu     float64
-		mem     float32
-		threads int32
+	// 默认动态刷新
+	cmd.showTopProcessesWatch(count)
+}
+
+func (cmd *SystemCommand) showTopProcessesOnce(count int) {
+	fmt.Println(cmd.cli.formatter.Header(fmt.Sprintf("\n=== Top %d 进程 (按CPU排序) ===", count)))
+	fmt.Println()
+
+	procList := cmd.getTopProcessList()
+	if procList == nil {
+		return
 	}
 
-	var procList []procInfo
-	for _, p := range procs {
-		name, _ := p.Name()
-		cpu, _ := p.CPUPercent()
-		mem, _ := p.MemoryPercent()
-		threads, _ := p.NumThreads()
+	cmd.printProcessTable(procList, count)
+}
 
-		procList = append(procList, procInfo{
-			pid:     p.Pid,
-			name:    name,
-			cpu:     cpu,
-			mem:     mem,
-			threads: threads,
-		})
+func (cmd *SystemCommand) showTopProcessesWatch(count int) {
+	fmt.Println(cmd.cli.formatter.Info("动态监控模式，按 Enter 键退出..."))
+	fmt.Println()
+
+	// 创建一个 channel 来接收退出信号
+	stopChan := make(chan struct{})
+
+	// 在后台监听用户输入
+	go func() {
+		cmd.cli.scanner.Scan()
+		close(stopChan)
+	}()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// 先显示一次
+	cmd.renderTopProcesses(count)
+
+	for {
+		select {
+		case <-stopChan:
+			fmt.Println(cmd.cli.formatter.Info("\n已退出动态监控"))
+			return
+		case <-ticker.C:
+			cmd.renderTopProcesses(count)
+		}
+	}
+}
+
+func (cmd *SystemCommand) renderTopProcesses(count int) {
+	fmt.Print("\033[H\033[J")
+	now := time.Now().Format("15:04:05")
+	fmt.Printf("=== Top %d 进程 (按CPU排序) === [%s] 按 Enter 退出\n\n", count, now)
+
+	procList := cmd.getTopProcessList()
+	if procList == nil {
+		return
+	}
+
+	cmd.printProcessTable(procList, count)
+}
+
+func (cmd *SystemCommand) printProcessTable(procList []types.ProcessInfo, count int) {
+	// 表头：与 Web 页面保持一致
+	fmt.Printf("%-7s %-18s %6s %9s %9s %8s %8s %8s %8s %6s %s\n",
+		"PID", "名称", "CPU%", "内存", "内存增速", "磁盘读", "磁盘写", "网络收", "网络发", "线程", "用户")
+	fmt.Println(strings.Repeat("-", 120))
+
+	for i := 0; i < len(procList) && i < count; i++ {
+		p := procList[i]
+		name := cmd.cli.formatter.Truncate(p.Name, 16)
+		user := cmd.cli.formatter.Truncate(p.Username, 12)
+
+		// CPU 高亮
+		cpuStr := fmt.Sprintf("%6.1f", p.CPUPct)
+		if p.CPUPct > 50 {
+			cpuStr = cmd.cli.formatter.Error(cpuStr)
+		} else if p.CPUPct > 20 {
+			cpuStr = cmd.cli.formatter.Warning(cpuStr)
+		}
+
+		fmt.Printf("%-7d %-18s %s %9s %9s %8s %8s %8s %8s %6d %s\n",
+			p.PID,
+			name,
+			cpuStr,
+			FormatBytes(p.RSSBytes),
+			FormatMemGrowth(p.RSSGrowthRate),
+			FormatBytesRate(p.DiskReadRate),
+			FormatBytesRate(p.DiskWriteRate),
+			FormatBytesRate(p.NetRecvRate),
+			FormatBytesRate(p.NetSendRate),
+			p.NumThreads,
+			user,
+		)
+	}
+}
+
+func (cmd *SystemCommand) getTopProcessList() []types.ProcessInfo {
+	procs, err := cmd.cli.monitor.ListAllProcesses()
+	if err != nil {
+		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("获取进程列表失败: %v", err)))
+		return nil
 	}
 
 	// 按CPU排序
-	for i := 0; i < len(procList)-1; i++ {
-		for j := i + 1; j < len(procList); j++ {
-			if procList[j].cpu > procList[i].cpu {
-				procList[i], procList[j] = procList[j], procList[i]
+	for i := 0; i < len(procs)-1; i++ {
+		for j := i + 1; j < len(procs); j++ {
+			if procs[j].CPUPct > procs[i].CPUPct {
+				procs[i], procs[j] = procs[j], procs[i]
 			}
 		}
 	}
 
-	// 表头
-	fmt.Println(cmd.cli.formatter.Bold(fmt.Sprintf("%-8s %-25s %10s %10s %8s", "PID", "名称", "CPU%", "内存%", "线程")))
-	fmt.Println(strings.Repeat("-", 65))
-
-	for i := 0; i < len(procList) && i < count; i++ {
-		p := procList[i]
-		name := cmd.cli.formatter.Truncate(p.name, 23)
-		cpuStr := fmt.Sprintf("%.1f", p.cpu)
-		memStr := fmt.Sprintf("%.1f", p.mem)
-
-		// 高CPU高亮
-		if p.cpu > 50 {
-			cpuStr = cmd.cli.formatter.Error(cpuStr)
-		} else if p.cpu > 20 {
-			cpuStr = cmd.cli.formatter.Warning(cpuStr)
-		}
-
-		fmt.Printf("%-8d %-25s %10s %10s %8d\n", p.pid, name, cpuStr, memStr, p.threads)
-	}
+	return procs
 }
 
 func (cmd *SystemCommand) listProcesses(args []string) {
@@ -219,10 +372,17 @@ func (cmd *SystemCommand) listProcesses(args []string) {
 	fmt.Println(cmd.cli.formatter.Header("\n=== 进程列表 ==="))
 	fmt.Println()
 
-	procs, err := process.Processes()
+	// 使用 monitor 的 ListAllProcesses，与 Web 数据源一致
+	procs, err := cmd.cli.monitor.ListAllProcesses()
 	if err != nil {
 		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("获取进程列表失败: %v", err)))
 		return
+	}
+
+	// 获取总内存用于计算百分比
+	var totalMem uint64
+	if memInfo, _ := mem.VirtualMemory(); memInfo != nil {
+		totalMem = memInfo.Total
 	}
 
 	fmt.Println(cmd.cli.formatter.Bold(fmt.Sprintf("%-8s %-30s %10s %10s %-20s", "PID", "名称", "CPU%", "内存%", "状态")))
@@ -230,19 +390,18 @@ func (cmd *SystemCommand) listProcesses(args []string) {
 
 	count := 0
 	for _, p := range procs {
-		name, _ := p.Name()
-		if pattern != "" && !strings.Contains(strings.ToLower(name), pattern) {
+		if pattern != "" && !strings.Contains(strings.ToLower(p.Name), pattern) {
 			continue
 		}
 
-		cpu, _ := p.CPUPercent()
-		mem, _ := p.MemoryPercent()
-		status, _ := p.Status()
+		var memPct float64
+		if totalMem > 0 {
+			memPct = float64(p.RSSBytes) / float64(totalMem) * 100
+		}
 
-		statusStr := strings.Join(status, ",")
-		name = cmd.cli.formatter.Truncate(name, 28)
+		name := cmd.cli.formatter.Truncate(p.Name, 28)
 
-		fmt.Printf("%-8d %-30s %10.1f %10.1f %-20s\n", p.Pid, name, cpu, mem, statusStr)
+		fmt.Printf("%-8d %-30s %10.1f %10.1f %-20s\n", p.PID, name, p.CPUPct, memPct, p.Status)
 		count++
 
 		if count >= 100 {

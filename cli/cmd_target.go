@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"monitor-agent/types"
 )
@@ -22,7 +23,7 @@ func NewTargetCommand(cli *CLI) *TargetCommand {
 func (c *TargetCommand) Handle(subCmd string, args []string) {
 	switch subCmd {
 	case "list", "ls", "":
-		c.list()
+		c.list(args)
 	case "add":
 		c.add(args)
 	case "remove", "rm":
@@ -43,7 +44,7 @@ func (c *TargetCommand) Handle(subCmd string, args []string) {
 func (c *TargetCommand) PrintHelp() {
 	fmt.Println(c.cli.formatter.Header("\n目标管理命令 (target):"))
 	fmt.Println()
-	fmt.Println("  target list                   - 列出所有监控目标")
+	fmt.Println("  target list [-1]              - 列出监控目标 (默认动态刷新, -1 只显示一次)")
 	fmt.Println("  target add <pid|name> [alias] - 添加监控目标")
 	fmt.Println("  target remove <pid>           - 移除监控目标")
 	fmt.Println("  target info <pid>             - 显示目标详细信息")
@@ -60,7 +61,109 @@ func (c *TargetCommand) PrintHelp() {
 }
 
 // list 列出监控目标
-func (c *TargetCommand) list() {
+func (c *TargetCommand) list(args []string) {
+	// 检查是否只显示一次
+	onceMode := false
+	for _, arg := range args {
+		if arg == "-1" || arg == "once" {
+			onceMode = true
+		}
+	}
+
+	if onceMode {
+		c.listOnce()
+		return
+	}
+
+	// 默认动态刷新
+	c.listWatch()
+}
+
+func (c *TargetCommand) listWatch() {
+	fmt.Println(c.cli.formatter.Info("动态监控模式，按 Enter 键退出..."))
+
+	stopChan := make(chan struct{})
+	go func() {
+		c.cli.scanner.Scan()
+		close(stopChan)
+	}()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	c.renderTargetList()
+
+	for {
+		select {
+		case <-stopChan:
+			fmt.Println(c.cli.formatter.Info("\n已退出动态监控"))
+			return
+		case <-ticker.C:
+			c.renderTargetList()
+		}
+	}
+}
+
+func (c *TargetCommand) renderTargetList() {
+	fmt.Print("\033[H\033[J")
+	now := time.Now().Format("15:04:05")
+
+	targets := c.cli.monitor.GetTargets()
+	if len(targets) == 0 {
+		fmt.Printf("监控目标列表 [%s] 按 Enter 退出\n\n", now)
+		fmt.Println(c.cli.formatter.Warning("当前没有监控目标"))
+		return
+	}
+
+	allProcesses, _ := c.cli.monitor.ListAllProcesses()
+	processMap := make(map[int32]*types.ProcessInfo)
+	for i := range allProcesses {
+		processMap[allProcesses[i].PID] = &allProcesses[i]
+	}
+
+	fmt.Printf("监控目标列表 (%d 个) [%s] 按 Enter 退出\n", len(targets), now)
+	fmt.Println(strings.Repeat("-", 120))
+
+	table := NewTable("PID", "名称", "别名", "状态", "CPU%", "内存", "内存增速", "磁盘读", "磁盘写", "网络收", "网络发")
+	table.PrintHeader()
+
+	for _, t := range targets {
+		p, exists := processMap[t.PID]
+		status := c.cli.formatter.StatusError("停止")
+		cpu, mem, memGrowth := "-", "-", "-"
+		diskRead, diskWrite, netRecv, netSend := "-", "-", "-", "-"
+
+		if exists {
+			status = c.cli.formatter.StatusOK("运行")
+			cpu = FormatPercent(p.CPUPct)
+			mem = FormatBytes(p.RSSBytes)
+			memGrowth = FormatMemGrowth(p.RSSGrowthRate)
+			diskRead = FormatBytesRate(p.DiskReadRate)
+			diskWrite = FormatBytesRate(p.DiskWriteRate)
+			netRecv = FormatBytesRate(p.NetRecvRate)
+			netSend = FormatBytesRate(p.NetSendRate)
+		}
+
+		alias := t.Alias
+		if alias == "" {
+			alias = "-"
+		}
+
+		table.AddRow(
+			fmt.Sprintf("%d", t.PID),
+			Truncate(t.Name, 15),
+			Truncate(alias, 10),
+			status,
+			cpu, mem, memGrowth,
+			diskRead, diskWrite, netRecv, netSend,
+		)
+	}
+
+	table.Flush()
+	fmt.Println(strings.Repeat("-", 120))
+}
+
+func (c *TargetCommand) listOnce() {
 	targets := c.cli.monitor.GetTargets()
 	if len(targets) == 0 {
 		fmt.Println(c.cli.formatter.Warning("当前没有监控目标"))

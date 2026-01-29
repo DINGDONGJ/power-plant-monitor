@@ -6,7 +6,7 @@
 
 - **专业定位**：专为电厂控制系统、厂级监控系统（SIS）、管理信息系统（MIS）等核心软件设计
 - **安全合规**：满足电力二次系统安全防护要求，支持独立部署
-- **无人值守**：支持 7×24 小时系统服务模式，适配电厂值班运维模式
+- **持续运行**：支持 7×24 小时持续监控，适配电厂值班运维模式
 - **事件追溯**：自动记录软件运行事件，便于缺陷追溯和故障分析
 - **双平台支持**：Windows / Linux 双平台，适配各类厂站服务器环境
 
@@ -123,37 +123,19 @@ GOOS=linux go build -o monitor-web ./cmd/web
 
 ---
 
-## 运行模式
-
-### 模式一：Web UI 模式（推荐值班室使用）
+## 运行
 
 ```bash
 ./monitor-web.exe -config config.json
 ```
 
-- 启动 Web 服务器，访问 `http://localhost:8080` 查看监控界面
-- 适合远程监控和值班室大屏展示
-- 按 `Ctrl+C` 退出
+启动后：
+- **CLI** 在前台运行，可交互操作
+- **Web** 服务器在后台运行，访问 `http://localhost:8080`
+- 两者共享同一个监控实例，数据完全同步
+- 输入 `exit` 退出程序
 
-### 模式二：CLI + Web 同时运行
-
-```bash
-./monitor-web.exe -cli -config config.json
-```
-
-- CLI 在前台运行，可交互操作
-- Web 服务器在后台运行
-- **两者共享同一个监控实例，数据完全同步**
-- 在 CLI 中的操作，Web 界面立即可见
-
-### 模式三：纯 CLI 模式
-
-```bash
-./monitor-web.exe -cli-only -config config.json
-```
-
-- 禁用 Web 服务器，仅运行 CLI
-- 适合服务器环境或不需要远程访问的场景
+> 提示：默认不输出日志到终端，输入 `log console on` 可开启
 
 ---
 
@@ -181,7 +163,7 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `target list` | 列出所有保障对象 | `target list` |
+| `target list` | 列出所有保障对象（动态刷新，`-1` 只显示一次） | `target list` |
 | `target add <pid\|name> [alias]` | 添加保障对象 | `target add edpf_hmi.exe DCS操作员站` |
 | `target remove <pid>` | 解除保障对象 | `target remove 1234` |
 | `target info <pid>` | 显示对象详情 | `target info 1234` |
@@ -202,8 +184,8 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `system status` | 显示系统整体状态 | `system status` |
-| `system top [n]` | 显示 Top N 软件（按 CPU） | `system top 20` |
+| `system status` | 显示系统整体状态（动态刷新，`-1` 只显示一次） | `system status` |
+| `system top [n]` | 显示 Top N 软件（动态刷新，`-1` 只显示一次） | `system top 20` |
 | `system ps [pattern]` | 列出软件（可过滤） | `system ps dcs` |
 | `system events [n]` | 显示最近事件 | `system events 50` |
 | `system watch <pid>` | 实时监控软件（60秒） | `system watch 1234` |
@@ -212,6 +194,7 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 
 | 命令 | 说明 |
 |------|------|
+| `log console [on\|off]` | 启停终端日志输出 |
 | `log tail [n]` | 查看最近 N 条日志（默认50） |
 | `log filter <type>` | 按类型过滤（METRIC/EVENT/IMPACT） |
 | `log export <file>` | 导出日志到文件 |
@@ -246,8 +229,9 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 
 ### 厂站软件列表
 - 实时显示系统所有软件
-- 支持按名称、PID、用户搜索
+- 支持按名称、PID、用户、描述搜索
 - 同名软件自动分组
+- 显示软件描述信息（类似任务管理器）
 - 可自定义显示列，拖拽调整顺序
 
 ### 保障管理
@@ -267,17 +251,9 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 | 参数 | 说明 |
 |------|------|
 | `-config <file>` | 指定配置文件（默认：config.json） |
-| `-cli` | CLI 模式（Web 根据配置决定是否启动） |
-| `-cli-only` | 纯 CLI 模式（禁用 Web） |
 | `-gen-config` | 生成示例配置文件 |
 | `-addr <addr>` | 覆盖服务器地址（如 `:8080`） |
 | `-log-dir <dir>` | 覆盖日志目录 |
-| `-service` | 以服务模式运行 |
-| `-install` | 安装系统服务 |
-| `-uninstall` | 卸载系统服务 |
-| `-start` | 启动服务 |
-| `-stop` | 停止服务 |
-| `-status` | 查看服务状态 |
 | `-version` | 显示版本信息 |
 
 ---
@@ -389,49 +365,6 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 
 ---
 
-## 服务部署
-
-### Windows 服务
-
-以管理员身份运行 PowerShell：
-
-```powershell
-# 安装服务
-.\monitor-web.exe -install
-
-# 启动服务
-.\monitor-web.exe -start
-
-# 查看状态
-.\monitor-web.exe -status
-
-# 停止服务
-.\monitor-web.exe -stop
-
-# 卸载服务
-.\monitor-web.exe -uninstall
-```
-
-### Linux systemd
-
-```bash
-# 安装服务（需要 root）
-sudo ./monitor-web -install
-
-# 启用并启动
-sudo systemctl daemon-reload
-sudo systemctl enable monitor-agent
-sudo systemctl start monitor-agent
-
-# 查看状态
-sudo systemctl status monitor-agent
-
-# 卸载
-sudo ./monitor-web -uninstall
-```
-
----
-
 ## API 接口
 
 | 接口 | 方法 | 说明 |
@@ -473,7 +406,7 @@ monitor-agent/
 ├── provider/             # 系统指标采集
 ├── netmon/               # 网络流量监控
 ├── server/               # HTTP 服务
-├── service/              # 系统服务支持
+├── service/              # 服务核心
 ├── logger/               # 统一日志
 ├── buffer/               # 数据结构
 ├── config/               # 配置管理
@@ -492,10 +425,7 @@ A: 需要管理员/root 权限才能进行网络抓包。Windows 需要安装 Np
 A: 正常现象，Windows 不提供 IO 等待时间指标。
 
 ### Q: 如何只使用 CLI 不启动 Web？
-A: 使用 `-cli-only` 参数，或在配置中设置 `server.enabled = false`。
-
-### Q: CLI 和 Web 数据是否同步？
-A: 是的，两者共享同一个监控实例，数据完全同步。
+A: 在配置中设置 `server.enabled = false`。
 
 ### Q: 如何监控远程服务器？
 A: 在远程服务器部署本程序，通过 `http://<服务器IP>:8080` 访问。
