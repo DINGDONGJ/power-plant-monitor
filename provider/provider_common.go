@@ -83,6 +83,13 @@ type systemSample struct {
 	sampleTime time.Time
 }
 
+// processListCache 进程列表缓存
+type processListCache struct {
+	processes  []types.ProcessInfo
+	cacheTime  time.Time
+	cacheTTL   time.Duration
+}
+
 // commonProvider 通用 provider 实现
 type commonProvider struct {
 	// 进程级采样
@@ -96,6 +103,10 @@ type commonProvider struct {
 	// 系统级采样缓存
 	sysSampleMu sync.RWMutex
 	sysSample   *systemSample
+
+	// 进程列表缓存（避免短时间内多次请求返回不同数据）
+	procCacheMu sync.RWMutex
+	procCache   *processListCache
 
 	// 进程网络监控
 	netMonitor *netmon.NetMonitor
@@ -134,6 +145,7 @@ func newCommonProvider(
 		rssSamples:         make(map[int32]*rssSample),
 		cpuSamples:         make(map[int32]*cpuSample),
 		sysSample:          &systemSample{sampleTime: time.Now()},
+		procCache:          &processListCache{cacheTTL: 500 * time.Millisecond}, // 500ms 缓存
 		numCPU:             numCPU,
 		divideByNumCPU:     divideByNumCPU,
 		matchProcessName:   matchName,
@@ -468,6 +480,34 @@ func (p *commonProvider) calcProcessCPU(pid int32, proc *process.Process) float6
 }
 
 func (p *commonProvider) ListAllProcesses() ([]types.ProcessInfo, error) {
+	// 检查缓存是否有效
+	p.procCacheMu.RLock()
+	if p.procCache.processes != nil && time.Since(p.procCache.cacheTime) < p.procCache.cacheTTL {
+		result := make([]types.ProcessInfo, len(p.procCache.processes))
+		copy(result, p.procCache.processes)
+		p.procCacheMu.RUnlock()
+		return result, nil
+	}
+	p.procCacheMu.RUnlock()
+
+	// 缓存过期，重新采集
+	result, err := p.collectAllProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新缓存
+	p.procCacheMu.Lock()
+	p.procCache.processes = make([]types.ProcessInfo, len(result))
+	copy(p.procCache.processes, result)
+	p.procCache.cacheTime = time.Now()
+	p.procCacheMu.Unlock()
+
+	return result, nil
+}
+
+// collectAllProcesses 实际采集所有进程信息
+func (p *commonProvider) collectAllProcesses() ([]types.ProcessInfo, error) {
 	procs, err := process.Processes()
 	if err != nil {
 		return nil, err

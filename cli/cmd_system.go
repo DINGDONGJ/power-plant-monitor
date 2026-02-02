@@ -311,7 +311,7 @@ func (cmd *SystemCommand) renderTopProcesses(count int) {
 
 func (cmd *SystemCommand) printProcessTable(procList []types.ProcessInfo, count int) {
 	// 表头：与 Web 页面保持一致
-	fmt.Printf("%-7s %-18s %6s %9s %9s %8s %8s %8s %8s %6s %s\n",
+	fmt.Printf("%-7s %-18s %7s %9s %9s %8s %8s %8s %8s %6s %s\n",
 		"PID", "名称", "CPU%", "内存", "内存增速", "磁盘读", "磁盘写", "网络收", "网络发", "线程", "用户")
 	fmt.Println(strings.Repeat("-", 120))
 
@@ -321,7 +321,7 @@ func (cmd *SystemCommand) printProcessTable(procList []types.ProcessInfo, count 
 		user := cmd.cli.formatter.Truncate(p.Username, 12)
 
 		// CPU 高亮
-		cpuStr := fmt.Sprintf("%6.1f", p.CPUPct)
+		cpuStr := fmt.Sprintf("%7.1f", p.CPUPct)
 		if p.CPUPct > 50 {
 			cpuStr = cmd.cli.formatter.Error(cpuStr)
 		} else if p.CPUPct > 20 {

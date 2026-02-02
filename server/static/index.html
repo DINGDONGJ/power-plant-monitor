@@ -1220,11 +1220,37 @@
             if (impactRefreshInterval) { clearInterval(impactRefreshInterval); impactRefreshInterval = null; }
         }
         
-        // 监控面板刷新（始终运行）
+        // 统一刷新函数：同时更新软件列表和保障面板
+        async function refreshAll() {
+            try {
+                const [procRes, targetsRes] = await Promise.all([
+                    fetch('/api/processes'),
+                    fetch('/api/monitor/targets')
+                ]);
+                allProcesses = await procRes.json();
+                const targets = await targetsRes.json();
+                monitoredPids = new Set(targets.map(t => t.pid));
+                
+                // 更新软件列表
+                document.getElementById('totalCount').textContent = allProcesses.length;
+                renderProcesses(getFilteredProcesses());
+                
+                // 更新保障面板（使用同一份数据）
+                const processMap = {};
+                allProcesses.forEach(p => {
+                    processMap[p.pid] = p;
+                });
+                renderTargets(targets, processMap);
+            } catch (e) {
+                console.error('刷新数据失败:', e);
+            }
+        }
+        
+        // 监控面板刷新（始终运行）- 改为统一刷新
         function startMonitorRefresh() {
             if (refreshInterval) return;
-            refreshTargets();
-            refreshInterval = setInterval(refreshTargets, 2000);
+            refreshAll();
+            refreshInterval = setInterval(refreshAll, 2000);
         }
 
         function startSystemRefresh() {
@@ -1260,25 +1286,14 @@
         }
 
         async function refreshProcesses() {
-            try {
-                const [procRes, targetsRes] = await Promise.all([
-                    fetch('/api/processes'),
-                    fetch('/api/monitor/targets')
-                ]);
-                allProcesses = await procRes.json();
-                const targets = await targetsRes.json();
-                monitoredPids = new Set(targets.map(t => t.pid));
-                document.getElementById('totalCount').textContent = allProcesses.length;
-                renderProcesses(getFilteredProcesses());
-            } catch (e) {
-                console.error('获取软件列表失败:', e);
-            }
+            // 改为调用统一刷新函数
+            await refreshAll();
         }
 
         function startProcessAutoRefresh() {
+            // 不再单独启动，由 startMonitorRefresh 统一管理
             if (processRefreshInterval) return;
-            refreshProcesses();
-            processRefreshInterval = setInterval(refreshProcesses, 2000);
+            processRefreshInterval = true; // 标记已启动，避免重复
         }
 
         function toggleGroup(name) {
@@ -1586,24 +1601,8 @@
         }
 
         async function refreshTargets() {
-            try {
-                const [targetsRes, processesRes] = await Promise.all([
-                    fetch('/api/monitor/targets'),
-                    fetch('/api/processes')
-                ]);
-                const targets = await targetsRes.json();
-                const processes = await processesRes.json();
-                
-                // 将软件列表转换为以 PID 为 key 的 map
-                const processMap = {};
-                processes.forEach(p => {
-                    processMap[p.pid] = p;
-                });
-                
-                renderTargets(targets, processMap);
-            } catch (e) {
-                console.error('获取监控目标失败:', e);
-            }
+            // 改为调用统一刷新函数，确保数据同步
+            await refreshAll();
         }
 
         // 保存目标配置到内存（用于显示标签）
@@ -1730,10 +1729,13 @@
                 case 'username': return `<span style="color:#ccc">${item.username || '-'}</span>`;
                 case 'cpu': return p ? p.cpu_pct.toFixed(2) : '-';
                 case 'mem': return p ? formatBytes(p.rss_bytes) : '-';
+                case 'memGrowth': return p ? formatMemGrowth(p.rss_growth_rate || 0) : '-';
                 case 'vms': return p ? formatBytes(p.vms || 0) : '-';
                 case 'fds': return `<span style="color:#ccc">${p ? (p.num_fds || 0) : '-'}</span>`;
                 case 'threads': return `<span style="color:#ccc">${p ? (p.num_threads || 0) : '-'}</span>`;
                 case 'priority': return `<span style="color:#ccc">${p ? (p.priority || 8) : '-'}</span>`;
+                case 'openFiles': return `<span style="color:#ccc">${p ? (p.open_files || p.num_fds || 0) : '-'}</span>`;
+                case 'listenPorts': return p ? formatListenPorts(p.listen_ports) : '-';
                 case 'diskRead': return p ? formatDiskRate(p.disk_read_rate || 0) : '-';
                 case 'diskWrite': return p ? formatDiskRate(p.disk_write_rate || 0) : '-';
                 case 'netRecv': return p ? formatDiskRate(p.net_recv_rate || 0) : '-';
