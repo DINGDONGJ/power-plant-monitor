@@ -18,7 +18,7 @@ func New() ProcProvider {
 		nil,
 		// getFileDescription: Linux 没有类似 Windows 的文件描述
 		nil,
-		// divideByNumCPU: Linux 风格，单核 100%，可超过 100%
-		false,
+		// divideByNumCPU: 进程 CPU 最大 100%
+		true,
 	)
 }

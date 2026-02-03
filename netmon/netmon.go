@@ -111,7 +111,7 @@ func (m *NetMonitor) Start() error {
 			continue
 		}
 
-		handle, err := pcap.OpenLive(device.Name, 65535, true, pcap.BlockForever)
+		handle, err := pcap.OpenLive(device.Name, 128, true, pcap.BlockForever)
 		if err != nil {
 			log.Printf("[NetMon] 打开接口 %s 失败: %v", device.Name, err)
 			continue

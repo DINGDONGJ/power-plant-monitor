@@ -341,6 +341,7 @@ func (p *commonProvider) GetMetrics(pid int32) (*types.ProcessMetrics, error) {
 	if memInfo != nil {
 		rss = memInfo.RSS
 	}
+
 	return &types.ProcessMetrics{
 		PID:      pid,
 		Name:     name,
@@ -579,6 +580,7 @@ func (p *commonProvider) collectAllProcesses() ([]types.ProcessInfo, error) {
 			rss = memInfo.RSS
 			vms = memInfo.VMS
 		}
+
 		statusStr := ""
 		if len(status) > 0 {
 			statusStr = status[0]
