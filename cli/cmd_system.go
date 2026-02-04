@@ -95,7 +95,7 @@ func (cmd *SystemCommand) showStatus(args []string) {
 	for {
 		select {
 		case <-stopChan:
-			fmt.Println(cmd.cli.formatter.Info("\n已退出动态监控"))
+			cmd.cli.ShowMainScreen()
 			return
 		case <-ticker.C:
 			cmd.renderStatusWatch()
@@ -288,7 +288,7 @@ func (cmd *SystemCommand) showTopProcessesWatch(count int) {
 	for {
 		select {
 		case <-stopChan:
-			fmt.Println(cmd.cli.formatter.Info("\n已退出动态监控"))
+			cmd.cli.ShowMainScreen()
 			return
 		case <-ticker.C:
 			cmd.renderTopProcesses(count)
@@ -493,8 +493,15 @@ func (cmd *SystemCommand) watchProcess(args []string) {
 
 	name, _ := p.Name()
 	fmt.Println(cmd.cli.formatter.Header(fmt.Sprintf("\n=== 实时监控: %s (PID: %d) ===", name, pid)))
-	fmt.Println(cmd.cli.formatter.Info("按 Ctrl+C 退出监控"))
+	fmt.Println(cmd.cli.formatter.Info("按 Enter 键退出监控"))
 	fmt.Println()
+
+	// 创建退出信号
+	stopChan := make(chan struct{})
+	go func() {
+		cmd.cli.scanner.Scan()
+		close(stopChan)
+	}()
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -502,12 +509,17 @@ func (cmd *SystemCommand) watchProcess(args []string) {
 	// 清除上一行的ANSI序列
 	clearLine := "\033[2K\r"
 
-	for i := 0; i < 30; i++ { // 监控60秒
+	for {
 		select {
+		case <-stopChan:
+			cmd.cli.ShowMainScreen()
+			return
 		case <-ticker.C:
 			// 检查进程是否存在
 			if running, _ := p.IsRunning(); !running {
 				fmt.Println(cmd.cli.formatter.Error("\n进程已退出"))
+				time.Sleep(time.Second)
+				cmd.cli.ShowMainScreen()
 				return
 			}
 
@@ -522,11 +534,6 @@ func (cmd *SystemCommand) watchProcess(args []string) {
 				cpu, mem,
 				cmd.cli.formatter.FormatBytes(memInfo.RSS),
 				threads, len(conns))
-
-			// 检查是否有输入（简单的退出检测）
-			if i == 29 {
-				fmt.Println("\n" + cmd.cli.formatter.Info("监控超时，自动退出"))
-			}
 		}
 	}
 }

@@ -96,7 +96,7 @@ func (c *TargetCommand) listWatch() {
 	for {
 		select {
 		case <-stopChan:
-			fmt.Println(c.cli.formatter.Info("\n已退出动态监控"))
+			c.cli.ShowMainScreen()
 			return
 		case <-ticker.C:
 			c.renderTargetList()

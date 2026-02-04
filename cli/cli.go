@@ -75,6 +75,13 @@ func (c *CLI) printBanner() {
 	fmt.Println(c.formatter.Header("╚═══════════════════════════════════════════════════════════╝"))
 }
 
+// ShowMainScreen 显示主界面（清屏后显示banner和帮助）
+func (c *CLI) ShowMainScreen() {
+	fmt.Print("\033[H\033[2J") // 清屏
+	c.printBanner()
+	c.printHelp()
+}
+
 func (c *CLI) printHelp() {
 	fmt.Println("\n" + c.formatter.Bold("命令分组:"))
 	fmt.Println()
