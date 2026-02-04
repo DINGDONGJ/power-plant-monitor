@@ -2152,23 +2152,23 @@
         
         function openImpactConfigModal() {
             const c = currentImpactConfig;
-            // 系统级别阈值
-            document.getElementById('impactCpuThreshold').value = c.cpu_threshold || 80;
-            document.getElementById('impactMemThreshold').value = c.memory_threshold || 85;
-            document.getElementById('impactDiskThreshold').value = c.disk_io_threshold || 100;
-            document.getElementById('impactNetThreshold').value = c.network_threshold || 100;
-            // 软件级别阈值
-            document.getElementById('impactProcCpuThreshold').value = c.proc_cpu_threshold || 50;
-            document.getElementById('impactProcMemThreshold').value = c.proc_memory_threshold || 1000;
-            document.getElementById('impactProcMemGrowthThreshold').value = c.proc_mem_growth_threshold || 10;
-            document.getElementById('impactProcVMSThreshold').value = c.proc_vms_threshold || 0;
-            document.getElementById('impactProcFDsThreshold').value = c.proc_fds_threshold || 1000;
-            document.getElementById('impactProcThreadsThreshold').value = c.proc_threads_threshold || 500;
-            document.getElementById('impactProcOpenFilesThreshold').value = c.proc_open_files_threshold || 500;
-            document.getElementById('impactProcDiskReadThreshold').value = c.proc_disk_read_threshold || 50;
-            document.getElementById('impactProcDiskWriteThreshold').value = c.proc_disk_write_threshold || 50;
-            document.getElementById('impactProcNetRecvThreshold').value = c.proc_net_recv_threshold || 50;
-            document.getElementById('impactProcNetSendThreshold').value = c.proc_net_send_threshold || 50;
+            // 系统级别阈值 (使用 ?? 处理 0 值)
+            document.getElementById('impactCpuThreshold').value = c.cpu_threshold ?? 80;
+            document.getElementById('impactMemThreshold').value = c.memory_threshold ?? 85;
+            document.getElementById('impactDiskThreshold').value = c.disk_io_threshold ?? 100;
+            document.getElementById('impactNetThreshold').value = c.network_threshold ?? 100;
+            // 软件级别阈值 (0 表示禁用检测)
+            document.getElementById('impactProcCpuThreshold').value = c.proc_cpu_threshold ?? 0;
+            document.getElementById('impactProcMemThreshold').value = c.proc_memory_threshold ?? 0;
+            document.getElementById('impactProcMemGrowthThreshold').value = c.proc_mem_growth_threshold ?? 0;
+            document.getElementById('impactProcVMSThreshold').value = c.proc_vms_threshold ?? 0;
+            document.getElementById('impactProcFDsThreshold').value = c.proc_fds_threshold ?? 0;
+            document.getElementById('impactProcThreadsThreshold').value = c.proc_threads_threshold ?? 0;
+            document.getElementById('impactProcOpenFilesThreshold').value = c.proc_open_files_threshold ?? 0;
+            document.getElementById('impactProcDiskReadThreshold').value = c.proc_disk_read_threshold ?? 0;
+            document.getElementById('impactProcDiskWriteThreshold').value = c.proc_disk_write_threshold ?? 0;
+            document.getElementById('impactProcNetRecvThreshold').value = c.proc_net_recv_threshold ?? 0;
+            document.getElementById('impactProcNetSendThreshold').value = c.proc_net_send_threshold ?? 0;
             document.getElementById('impactConfigModal').classList.add('show');
         }
         
@@ -2177,25 +2177,39 @@
         }
         
         async function saveImpactConfig() {
+            // 辅助函数：解析数值，空值返回当前配置值或默认值
+            const parseNum = (id, fallback) => {
+                const val = document.getElementById(id).value;
+                if (val === '' || val === null || val === undefined) return fallback;
+                const num = parseFloat(val);
+                return isNaN(num) ? fallback : num;
+            };
+            const parseInt2 = (id, fallback) => {
+                const val = document.getElementById(id).value;
+                if (val === '' || val === null || val === undefined) return fallback;
+                const num = parseInt(val);
+                return isNaN(num) ? fallback : num;
+            };
+            const c = currentImpactConfig;
             const config = {
-                ...currentImpactConfig,
+                ...c,
                 // 系统级别阈值
-                cpu_threshold: parseFloat(document.getElementById('impactCpuThreshold').value) || 80,
-                memory_threshold: parseFloat(document.getElementById('impactMemThreshold').value) || 85,
-                disk_io_threshold: parseFloat(document.getElementById('impactDiskThreshold').value) || 100,
-                network_threshold: parseFloat(document.getElementById('impactNetThreshold').value) || 100,
+                cpu_threshold: parseNum('impactCpuThreshold', c.cpu_threshold ?? 80),
+                memory_threshold: parseNum('impactMemThreshold', c.memory_threshold ?? 85),
+                disk_io_threshold: parseNum('impactDiskThreshold', c.disk_io_threshold ?? 100),
+                network_threshold: parseNum('impactNetThreshold', c.network_threshold ?? 100),
                 // 软件级别阈值
-                proc_cpu_threshold: parseFloat(document.getElementById('impactProcCpuThreshold').value) || 0,
-                proc_memory_threshold: parseFloat(document.getElementById('impactProcMemThreshold').value) || 0,
-                proc_mem_growth_threshold: parseFloat(document.getElementById('impactProcMemGrowthThreshold').value) || 0,
-                proc_vms_threshold: parseFloat(document.getElementById('impactProcVMSThreshold').value) || 0,
-                proc_fds_threshold: parseInt(document.getElementById('impactProcFDsThreshold').value) || 0,
-                proc_threads_threshold: parseInt(document.getElementById('impactProcThreadsThreshold').value) || 0,
-                proc_open_files_threshold: parseInt(document.getElementById('impactProcOpenFilesThreshold').value) || 0,
-                proc_disk_read_threshold: parseFloat(document.getElementById('impactProcDiskReadThreshold').value) || 0,
-                proc_disk_write_threshold: parseFloat(document.getElementById('impactProcDiskWriteThreshold').value) || 0,
-                proc_net_recv_threshold: parseFloat(document.getElementById('impactProcNetRecvThreshold').value) || 0,
-                proc_net_send_threshold: parseFloat(document.getElementById('impactProcNetSendThreshold').value) || 0
+                proc_cpu_threshold: parseNum('impactProcCpuThreshold', c.proc_cpu_threshold ?? 0),
+                proc_memory_threshold: parseNum('impactProcMemThreshold', c.proc_memory_threshold ?? 0),
+                proc_mem_growth_threshold: parseNum('impactProcMemGrowthThreshold', c.proc_mem_growth_threshold ?? 0),
+                proc_vms_threshold: parseNum('impactProcVMSThreshold', c.proc_vms_threshold ?? 0),
+                proc_fds_threshold: parseInt2('impactProcFDsThreshold', c.proc_fds_threshold ?? 0),
+                proc_threads_threshold: parseInt2('impactProcThreadsThreshold', c.proc_threads_threshold ?? 0),
+                proc_open_files_threshold: parseInt2('impactProcOpenFilesThreshold', c.proc_open_files_threshold ?? 0),
+                proc_disk_read_threshold: parseNum('impactProcDiskReadThreshold', c.proc_disk_read_threshold ?? 0),
+                proc_disk_write_threshold: parseNum('impactProcDiskWriteThreshold', c.proc_disk_write_threshold ?? 0),
+                proc_net_recv_threshold: parseNum('impactProcNetRecvThreshold', c.proc_net_recv_threshold ?? 0),
+                proc_net_send_threshold: parseNum('impactProcNetSendThreshold', c.proc_net_send_threshold ?? 0)
             };
             try {
                 const res = await fetch('/api/config/impact', {

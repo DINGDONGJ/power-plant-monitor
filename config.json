@@ -12,16 +12,16 @@
   },
   "targets": [
     {
-      "pid": 1356,
-      "name": "conhost.exe",
-      "alias": "控制台主机",
-      "cmdline": "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"
-    },
-    {
       "pid": 3296,
       "name": "explorer.exe",
       "alias": "Windows资源管理器",
       "cmdline": "C:\\Windows\\Explorer.EXE"
+    },
+    {
+      "pid": 1356,
+      "name": "conhost.exe",
+      "alias": "控制台主机",
+      "cmdline": "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"
     }
   ],
   "sampling": {

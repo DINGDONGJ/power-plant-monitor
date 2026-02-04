@@ -316,12 +316,7 @@ func (s *WebServer) handleImpactConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	if r.Method == "POST" {
-		var newCfg types.ImpactConfig
-		if err := json.NewDecoder(r.Body).Decode(&newCfg); err != nil {
-			s.errorResponse(w, 400, "invalid request body: "+err.Error())
-			return
-		}
-		
+		// 先读取当前配置作为基础
 		s.configMu.Lock()
 		defer s.configMu.Unlock()
 		
@@ -329,8 +324,11 @@ func (s *WebServer) handleImpactConfig(w http.ResponseWriter, r *http.Request) {
 			s.appConfig = config.DefaultConfig()
 		}
 		
-		// 更新配置
-		s.appConfig.Impact = newCfg
+		// 解码到当前配置上（只覆盖 JSON 中存在的字段）
+		if err := json.NewDecoder(r.Body).Decode(&s.appConfig.Impact); err != nil {
+			s.errorResponse(w, 400, "invalid request body: "+err.Error())
+			return
+		}
 		
 		// 保存到文件
 		if s.configFile != "" {
@@ -343,7 +341,7 @@ func (s *WebServer) handleImpactConfig(w http.ResponseWriter, r *http.Request) {
 		// 更新影响分析器配置
 		analyzer := s.multiMonitor.GetImpactAnalyzer()
 		if analyzer != nil {
-			analyzer.UpdateConfig(newCfg)
+			analyzer.UpdateConfig(s.appConfig.Impact)
 		}
 		
 		s.jsonResponse(w, map[string]string{"status": "ok"})

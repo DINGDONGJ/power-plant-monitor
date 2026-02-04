@@ -99,10 +99,7 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 		cancel:    cancel,
 	}
 
-	// 设置目标变化回调，自动保存配置
-	mm.SetTargetChangeCallback(func(targets []types.MonitorTarget) {
-		s.saveTargetsToConfig(targets)
-	})
+	// 注意：目标变化回调在 Start() 中设置，避免加载配置时触发保存
 
 	return s, nil
 }
@@ -115,10 +112,18 @@ func (s *Service) Start() error {
 	// 启动监控
 	s.mm.Start()
 
+	// 临时禁用目标变化回调（避免加载时触发保存）
+	s.mm.SetTargetChangeCallback(nil)
+
 	// 从配置文件加载监控目标
 	if err := s.loadTargetsFromConfig(); err != nil {
 		logger.Errorf("SERVICE", "Load targets from config failed: %v", err)
 	}
+
+	// 恢复目标变化回调
+	s.mm.SetTargetChangeCallback(func(targets []types.MonitorTarget) {
+		s.saveTargetsToConfig(targets)
+	})
 
 	// 启动 HTTP 服务器（如果启用）
 	if s.appConfig.Server.Enabled {
