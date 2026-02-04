@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"monitor-agent/config"
 )
 
 // ImpactCommand 影响分析命令组
@@ -45,14 +47,15 @@ func (cmd *ImpactCommand) PrintHelp() {
 	fmt.Println("  list [n]              - 列出最近的影响事件 (默认20)")
 	fmt.Println("  summary               - 显示影响统计汇总")
 	fmt.Println("  config                - 显示影响分析配置")
-	fmt.Println("  set <key> <value>     - 设置影响分析参数")
+	fmt.Println("  set <key> <value>     - 设置影响分析参数 (自动保存)")
 	fmt.Println("  clear                 - 清除所有影响事件记录")
 	fmt.Println()
-	fmt.Println(cmd.cli.formatter.Info("可设置的参数:"))
-	fmt.Println("  cpu_threshold         - CPU影响阈值 (0-100)")
-	fmt.Println("  memory_threshold      - 内存影响阈值 (0-100)")
-	fmt.Println("  io_threshold          - IO影响阈值 (0-100)")
-	fmt.Println("  enabled               - 启用/禁用分析 (true/false)")
+	fmt.Println(cmd.cli.formatter.Info("系统级阈值: cpu, memory, disk_io, network"))
+	fmt.Println(cmd.cli.formatter.Info("进程级阈值: proc_cpu, proc_mem, proc_fds, proc_threads..."))
+	fmt.Println(cmd.cli.formatter.Info("其他: enabled, interval"))
+	fmt.Println()
+	fmt.Println(cmd.cli.formatter.Info("示例: impact set cpu 80"))
+	fmt.Println(cmd.cli.formatter.Info("示例: impact set proc_mem 500"))
 }
 
 func (cmd *ImpactCommand) listImpacts(args []string) {
@@ -229,63 +232,182 @@ func (cmd *ImpactCommand) showConfig() {
 	fmt.Printf("  启用状态: %s\n", cmd.cli.formatter.FormatBool(cfg.Enabled))
 	fmt.Println()
 	
-	fmt.Println(cmd.cli.formatter.Bold("阈值设置:"))
-	fmt.Printf("  CPU阈值:    %s\n", cmd.cli.formatter.FormatPercent(cfg.CPUThreshold))
-	fmt.Printf("  内存阈值:   %s\n", cmd.cli.formatter.FormatPercent(cfg.MemoryThreshold))
-	fmt.Printf("  IO阈值:     %s\n", cmd.cli.formatter.FormatPercent(cfg.DiskIOThreshold))
+	fmt.Println(cmd.cli.formatter.Bold("系统级阈值:"))
+	fmt.Printf("  CPU阈值:      %.0f%%\n", cfg.CPUThreshold)
+	fmt.Printf("  内存阈值:     %.0f%%\n", cfg.MemoryThreshold)
+	fmt.Printf("  磁盘IO阈值:   %.0f MB/s\n", cfg.DiskIOThreshold)
+	fmt.Printf("  网络阈值:     %.0f MB/s\n", cfg.NetworkThreshold)
+	fmt.Println()
+	
+	fmt.Println(cmd.cli.formatter.Bold("进程级阈值:"))
+	fmt.Printf("  CPU:          %.0f%%\n", cfg.ProcCPUThreshold)
+	fmt.Printf("  内存:         %.0f MB\n", cfg.ProcMemoryThreshold)
+	fmt.Printf("  内存增速:     %.0f MB/s\n", cfg.ProcMemGrowthThreshold)
+	fmt.Printf("  句柄数:       %d\n", cfg.ProcFDsThreshold)
+	fmt.Printf("  线程数:       %d\n", cfg.ProcThreadsThreshold)
+	fmt.Printf("  磁盘读:       %.0f MB/s\n", cfg.ProcDiskReadThreshold)
+	fmt.Printf("  磁盘写:       %.0f MB/s\n", cfg.ProcDiskWriteThreshold)
+	fmt.Printf("  网络收:       %.0f MB/s\n", cfg.ProcNetRecvThreshold)
+	fmt.Printf("  网络发:       %.0f MB/s\n", cfg.ProcNetSendThreshold)
 	fmt.Println()
 	
 	fmt.Println(cmd.cli.formatter.Bold("分析参数:"))
-	fmt.Printf("  分析周期:   %d秒\n", cfg.AnalysisInterval)
-	fmt.Printf("  最大记录:   %d\n", cfg.HistoryLen)
+	fmt.Printf("  分析周期:     %d秒\n", cfg.AnalysisInterval)
+	fmt.Printf("  最大记录:     %d\n", cfg.HistoryLen)
+	fmt.Printf("  端口检测间隔: %d秒\n", cfg.PortCheckInterval)
+	fmt.Printf("  文件检测间隔: %d秒\n", cfg.FileCheckInterval)
 }
 
 func (cmd *ImpactCommand) setConfig(args []string) {
 	if len(args) < 2 {
 		fmt.Println(cmd.cli.formatter.Error("用法: impact set <key> <value>"))
-		fmt.Println(cmd.cli.formatter.Info("可用键: cpu_threshold, memory_threshold, io_threshold, enabled"))
+		fmt.Println()
+		fmt.Println(cmd.cli.formatter.Info("系统级阈值:"))
+		fmt.Println("  cpu, memory, disk_io, network")
+		fmt.Println()
+		fmt.Println(cmd.cli.formatter.Info("进程级阈值:"))
+		fmt.Println("  proc_cpu, proc_mem, proc_mem_growth")
+		fmt.Println("  proc_fds, proc_threads")
+		fmt.Println("  proc_disk_read, proc_disk_write")
+		fmt.Println("  proc_net_recv, proc_net_send")
+		fmt.Println()
+		fmt.Println(cmd.cli.formatter.Info("其他:"))
+		fmt.Println("  enabled, interval")
 		return
 	}
 
 	key := strings.ToLower(args[0])
 	value := args[1]
+	cfg := &cmd.cli.config.Impact
+
+	var updated bool
+	var msg string
 
 	switch key {
-	case "cpu_threshold", "cpu":
+	// 系统级阈值
+	case "cpu", "cpu_threshold":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
-			cmd.cli.config.Impact.CPUThreshold = v
-			fmt.Println(cmd.cli.formatter.Success(fmt.Sprintf("CPU阈值已设置为: %.1f%%", v)))
-		} else {
-			fmt.Println(cmd.cli.formatter.Error("无效的数值"))
+			cfg.CPUThreshold = v
+			msg = fmt.Sprintf("系统CPU阈值: %.0f%%", v)
+			updated = true
 		}
-	case "memory_threshold", "mem":
+	case "memory", "memory_threshold", "mem":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
-			cmd.cli.config.Impact.MemoryThreshold = v
-			fmt.Println(cmd.cli.formatter.Success(fmt.Sprintf("内存阈值已设置为: %.1f%%", v)))
-		} else {
-			fmt.Println(cmd.cli.formatter.Error("无效的数值"))
+			cfg.MemoryThreshold = v
+			msg = fmt.Sprintf("系统内存阈值: %.0f%%", v)
+			updated = true
 		}
-	case "io_threshold", "io":
+	case "disk_io", "io_threshold", "io":
 		if v, err := strconv.ParseFloat(value, 64); err == nil {
-			cmd.cli.config.Impact.DiskIOThreshold = v
-			fmt.Println(cmd.cli.formatter.Success(fmt.Sprintf("IO阈值已设置为: %.1f MB/s", v)))
-		} else {
-			fmt.Println(cmd.cli.formatter.Error("无效的数值"))
+			cfg.DiskIOThreshold = v
+			msg = fmt.Sprintf("系统磁盘IO阈值: %.0f MB/s", v)
+			updated = true
 		}
+	case "network", "network_threshold", "net":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.NetworkThreshold = v
+			msg = fmt.Sprintf("系统网络阈值: %.0f MB/s", v)
+			updated = true
+		}
+
+	// 进程级阈值
+	case "proc_cpu":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcCPUThreshold = v
+			msg = fmt.Sprintf("进程CPU阈值: %.0f%%", v)
+			updated = true
+		}
+	case "proc_mem", "proc_memory":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcMemoryThreshold = v
+			msg = fmt.Sprintf("进程内存阈值: %.0f MB", v)
+			updated = true
+		}
+	case "proc_mem_growth":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcMemGrowthThreshold = v
+			msg = fmt.Sprintf("进程内存增速阈值: %.0f MB/s", v)
+			updated = true
+		}
+	case "proc_fds":
+		if v, err := strconv.Atoi(value); err == nil {
+			cfg.ProcFDsThreshold = v
+			msg = fmt.Sprintf("进程句柄数阈值: %d", v)
+			updated = true
+		}
+	case "proc_threads":
+		if v, err := strconv.Atoi(value); err == nil {
+			cfg.ProcThreadsThreshold = v
+			msg = fmt.Sprintf("进程线程数阈值: %d", v)
+			updated = true
+		}
+	case "proc_disk_read":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcDiskReadThreshold = v
+			msg = fmt.Sprintf("进程磁盘读阈值: %.0f MB/s", v)
+			updated = true
+		}
+	case "proc_disk_write":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcDiskWriteThreshold = v
+			msg = fmt.Sprintf("进程磁盘写阈值: %.0f MB/s", v)
+			updated = true
+		}
+	case "proc_net_recv":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcNetRecvThreshold = v
+			msg = fmt.Sprintf("进程网络收阈值: %.0f MB/s", v)
+			updated = true
+		}
+	case "proc_net_send":
+		if v, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.ProcNetSendThreshold = v
+			msg = fmt.Sprintf("进程网络发阈值: %.0f MB/s", v)
+			updated = true
+		}
+
+	// 其他配置
 	case "enabled":
 		if v, err := strconv.ParseBool(value); err == nil {
-			cmd.cli.config.Impact.Enabled = v
-			status := "已启用"
-			if !v {
-				status = "已禁用"
+			cfg.Enabled = v
+			if v {
+				msg = "影响分析已启用"
+			} else {
+				msg = "影响分析已禁用"
 			}
-			fmt.Println(cmd.cli.formatter.Success(fmt.Sprintf("影响分析%s", status)))
-		} else {
-			fmt.Println(cmd.cli.formatter.Error("无效的布尔值，请使用 true/false"))
+			updated = true
 		}
+	case "interval", "analysis_interval":
+		if v, err := strconv.Atoi(value); err == nil && v > 0 {
+			cfg.AnalysisInterval = v
+			msg = fmt.Sprintf("分析间隔: %d秒", v)
+			updated = true
+		}
+
 	default:
 		fmt.Println(cmd.cli.formatter.Error(fmt.Sprintf("未知配置项: %s", key)))
+		return
 	}
+
+	if !updated {
+		fmt.Println(cmd.cli.formatter.Error("无效的数值"))
+		return
+	}
+
+	// 同步到 ImpactAnalyzer
+	analyzer := cmd.cli.monitor.GetImpactAnalyzer()
+	if analyzer != nil {
+		analyzer.UpdateConfig(*cfg)
+	}
+
+	// 保存到配置文件
+	if cmd.cli.configFile != "" {
+		if err := config.SaveConfig(cmd.cli.configFile, cmd.cli.config); err != nil {
+			fmt.Println(cmd.cli.formatter.Warning(fmt.Sprintf("保存配置失败: %v", err)))
+		}
+	}
+
+	fmt.Println(cmd.cli.formatter.Success(msg + " (已保存)"))
 }
 
 func (cmd *ImpactCommand) clearImpacts() {

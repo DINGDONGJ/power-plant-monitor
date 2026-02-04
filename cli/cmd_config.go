@@ -251,8 +251,13 @@ func (c *ConfigCommand) set(args []string) {
 		if analyzer := c.cli.monitor.GetImpactAnalyzer(); analyzer != nil {
 			analyzer.UpdateConfig(cfg.Impact)
 		}
-		fmt.Println(f.Success(fmt.Sprintf("已设置 %s = %s", key, value)))
-		fmt.Println(f.Info("使用 'config save' 保存到文件"))
+		
+		// 自动保存到文件
+		if err := config.SaveConfig(c.cli.configFile, c.cli.config); err != nil {
+			fmt.Println(f.Warning(fmt.Sprintf("保存配置失败: %v", err)))
+		}
+		
+		fmt.Println(f.Success(fmt.Sprintf("已设置 %s = %s (已保存)", key, value)))
 	}
 }
 

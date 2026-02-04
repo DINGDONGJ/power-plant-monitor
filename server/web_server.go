@@ -68,6 +68,7 @@ func NewWebServerWithAuth(mm *monitor.MultiMonitor, authCfg AuthConfig, appCfg *
 	s.mux.HandleFunc("/api/system", s.handleSystem)
 	s.mux.HandleFunc("/api/impacts", s.handleImpacts)
 	s.mux.HandleFunc("/api/impacts/summary", s.handleImpactsSummary)
+	s.mux.HandleFunc("/api/impacts/clear", s.handleImpactsClear)
 	s.mux.HandleFunc("/api/config/impact", s.handleImpactConfig)
 
 	// 静态文件
@@ -288,6 +289,16 @@ func (s *WebServer) handleImpacts(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) handleImpactsSummary(w http.ResponseWriter, r *http.Request) {
 	summary := s.multiMonitor.GetImpactSummary()
 	s.jsonResponse(w, summary)
+}
+
+// POST /api/impacts/clear - 清除所有影响事件
+func (s *WebServer) handleImpactsClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		s.errorResponse(w, 405, "method not allowed")
+		return
+	}
+	s.multiMonitor.ClearImpactEvents()
+	s.jsonResponse(w, map[string]string{"status": "ok"})
 }
 
 // GET/POST /api/config/impact - 获取或更新影响分析配置

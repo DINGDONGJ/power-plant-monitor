@@ -12,14 +12,16 @@
   },
   "targets": [
     {
-      "pid": 0,
+      "pid": 1356,
       "name": "conhost.exe",
-      "alias": "控制台主机"
+      "alias": "控制台主机",
+      "cmdline": "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"
     },
     {
-      "pid": 0,
+      "pid": 3296,
       "name": "explorer.exe",
-      "alias": "Windows资源管理器"
+      "alias": "Windows资源管理器",
+      "cmdline": "C:\\Windows\\Explorer.EXE"
     }
   ],
   "sampling": {
@@ -36,17 +38,17 @@
     "memory_threshold": 50,
     "disk_io_threshold": 100,
     "network_threshold": 100,
-    "proc_cpu_threshold": 50,
-    "proc_memory_threshold": 1000,
-    "proc_mem_growth_threshold": 10,
+    "proc_cpu_threshold": 0,
+    "proc_memory_threshold": 0,
+    "proc_mem_growth_threshold": 0,
     "proc_vms_threshold": 0,
-    "proc_fds_threshold": 100000,
-    "proc_threads_threshold": 50000,
-    "proc_open_files_threshold": 500,
-    "proc_disk_read_threshold": 50,
-    "proc_disk_write_threshold": 50,
-    "proc_net_recv_threshold": 50,
-    "proc_net_send_threshold": 50,
+    "proc_fds_threshold": 0,
+    "proc_threads_threshold": 0,
+    "proc_open_files_threshold": 0,
+    "proc_disk_read_threshold": 0,
+    "proc_disk_write_threshold": 0,
+    "proc_net_recv_threshold": 0,
+    "proc_net_send_threshold": 0,
     "file_check_interval": 30,
     "port_check_interval": 30
   }

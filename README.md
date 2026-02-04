@@ -2,6 +2,17 @@
 
 专为电厂 DCS、SIS、MIS 等核心软件系统设计的运行状态监控工具。
 
+## v2.1 更新内容
+
+- **配置自动保存**：CLI 和 Web 的配置修改自动保存到 config.json
+- **数据实时同步**：CLI 和 Web 共享同一监控实例，数据完全同步
+- **移除 pcap 依赖**：网络流量监控改用 gopsutil，无需安装 Npcap/libpcap
+- **内存优化**：降低内存占用，减少 GC 波动
+- **完善阈值配置**：支持通过 CLI/Web 设置所有进程级阈值
+- **新增 API**：`/api/impacts/clear`、`/api/monitor/start`、`/api/monitor/stop` 等
+
+---
+
 ## 产品特点
 
 - **专业定位**：专为电厂控制系统、厂级监控系统（SIS）、管理信息系统（MIS）等核心软件设计
@@ -51,16 +62,9 @@
 
 ### 编译依赖
 
-软件网络流量监控使用 gopacket 抓包，需要安装 pcap 库：
+~~软件网络流量监控使用 gopacket 抓包，需要安装 pcap 库~~
 
-**Linux**：
-```bash
-sudo apt install libpcap-dev
-```
-
-**Windows**：
-- 下载安装 [Npcap](https://npcap.com/)
-- 安装时勾选 "Install Npcap in WinPcap API-compatible Mode"
+**v2.1 更新**：网络流量监控已改用 gopsutil 实现，无需安装 pcap 库。进程级流量为估算值（按连接数比例分配），系统总流量为精确值。
 
 ### 编译
 
@@ -148,8 +152,8 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 | 命令 | 说明 |
 |------|------|
 | `config show` | 显示当前配置（包括采样、阈值等） |
-| `config set <key> <value>` | 设置配置项 |
-| `config save` | 保存配置到文件 |
+| `config set <key> <value>` | 设置配置项（自动保存） |
+| `config save` | 手动保存配置到文件 |
 | `config reload` | 重新加载配置 |
 
 **可设置的配置项**：
@@ -158,17 +162,26 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 - `memory-threshold` - 系统内存阈值（%）
 - `proc-cpu` - 软件 CPU 阈值（%）
 - `proc-mem` - 软件内存阈值（MB）
+- `proc-threads` - 软件线程数阈值
+- `proc-fds` - 软件句柄数阈值
+- `proc-disk-read` / `proc-disk-write` - 软件磁盘读写阈值（MB/s）
+- `proc-net-recv` / `proc-net-send` - 软件网络收发阈值（MB/s）
+
+> **v2.1 更新**：配置修改后自动保存到文件，CLI 和 Web 配置实时同步
 
 ### 保障对象管理 (target)
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `target list` | 列出所有保障对象（动态刷新，`-1` 只显示一次） | `target list` |
-| `target add <pid\|name> [alias]` | 添加保障对象 | `target add edpf_hmi.exe DCS操作员站` |
-| `target remove <pid>` | 解除保障对象 | `target remove 1234` |
+| `target list` | 列出所有保障对象（动态刷新） | `target list` |
+| `target list -1` | 列出所有保障对象（只显示一次） | `target list -1` |
+| `target add <pid\|name> [alias]` | 添加保障对象（自动保存） | `target add edpf_hmi.exe DCS操作员站` |
+| `target remove <pid>` | 解除保障对象（自动保存） | `target remove 1234` |
 | `target info <pid>` | 显示对象详情 | `target info 1234` |
-| `target update <pid> <key> <val>` | 更新对象配置 | `target update 1234 alias DCS工程师站` |
-| `target clear` | 清除所有对象 | `target clear` |
+| `target update <pid> <key> <val>` | 更新对象配置（自动保存） | `target update 1234 alias DCS工程师站` |
+| `target clear` | 清除所有对象（自动保存） | `target clear` |
+
+> **v2.1 更新**：目标增删改操作自动保存到配置文件，CLI 和 Web 数据实时同步
 
 ### 风险分析 (impact)
 
@@ -176,16 +189,25 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 |------|------|
 | `impact list [n]` | 显示风险事件（默认20条） |
 | `impact summary` | 显示风险统计汇总 |
-| `impact config` | 显示风险分析配置 |
-| `impact set <key> <value>` | 设置风险分析参数 |
+| `impact config` | 显示风险分析配置（含所有阈值） |
+| `impact set <key> <value>` | 设置风险分析参数（自动保存） |
 | `impact clear` | 清除所有风险事件 |
+
+**可设置的参数**：
+- 系统级：`cpu`, `memory`, `disk_io`, `network`
+- 进程级：`proc_cpu`, `proc_mem`, `proc_fds`, `proc_threads`, `proc_disk_read`, `proc_disk_write`, `proc_net_recv`, `proc_net_send`
+- 其他：`enabled`, `interval`
+
+> **v2.1 更新**：支持设置所有阈值参数，修改后自动保存并同步到分析器
 
 ### 系统信息 (system)
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
-| `system status` | 显示系统整体状态（动态刷新，`-1` 只显示一次） | `system status` |
-| `system top [n]` | 显示 Top N 软件（动态刷新，`-1` 只显示一次） | `system top 20` |
+| `system status` | 显示系统整体状态（动态刷新） | `system status` |
+| `system status -1` | 显示系统整体状态（只显示一次） | `system status -1` |
+| `system top [n]` | 显示 Top N 软件（动态刷新） | `system top 20` |
+| `system top [n] -1` | 显示 Top N 软件（只显示一次） | `system top 20 -1` |
 | `system ps [pattern]` | 列出软件（可过滤） | `system ps dcs` |
 | `system events [n]` | 显示最近事件 | `system events 50` |
 | `system watch <pid>` | 实时监控软件（60秒） | `system watch 1234` |
@@ -372,14 +394,23 @@ CLI 采用命令组架构，每个命令组包含多个子命令。
 | `/api/processes` | GET | 获取所有软件列表 |
 | `/api/system` | GET | 获取系统指标 |
 | `/api/monitor/targets` | GET | 获取保障对象列表 |
-| `/api/monitor/add` | POST | 添加保障对象 |
-| `/api/monitor/remove` | POST | 解除保障对象 |
-| `/api/monitor/removeAll` | POST | 解除所有对象 |
-| `/api/monitor/update` | POST | 更新对象配置 |
-| `/api/events` | GET | 获取事件日志 |
-| `/api/process-changes` | GET | 获取软件变化记录 |
-| `/api/impacts` | GET | 获取风险事件 |
-| `/api/impact/summary` | GET | 获取风险统计 |
+| `/api/monitor/add` | POST | 添加保障对象（自动保存配置） |
+| `/api/monitor/remove` | POST | 解除保障对象（自动保存配置） |
+| `/api/monitor/removeAll` | POST | 解除所有对象（自动保存配置） |
+| `/api/monitor/update` | POST | 更新对象配置（自动保存配置） |
+| `/api/monitor/start` | POST | 启动监控 |
+| `/api/monitor/stop` | POST | 停止监控 |
+| `/api/metrics?pid=&n=` | GET | 获取指定软件历史指标 |
+| `/api/metrics/latest` | GET | 获取所有目标最新指标 |
+| `/api/events?n=` | GET | 获取事件日志 |
+| `/api/process-changes?n=` | GET | 获取软件变化记录 |
+| `/api/impacts?n=` | GET | 获取风险事件 |
+| `/api/impacts/summary` | GET | 获取风险统计 |
+| `/api/impacts/clear` | POST | 清除所有风险事件 |
+| `/api/config/impact` | GET/POST | 获取或更新风险分析配置（自动保存） |
+| `/api/status` | GET | 获取监控状态 |
+
+> **v2.1 更新**：新增 `/api/impacts/clear`、`/api/monitor/start`、`/api/monitor/stop`、`/api/metrics/latest` 等接口
 
 ---
 
@@ -419,7 +450,10 @@ monitor-agent/
 ## 常见问题
 
 ### Q: 网络流量显示为 0？
-A: 需要管理员/root 权限才能进行网络抓包。Windows 需要安装 Npcap，Linux 需要 libpcap-dev。
+A: v2.1 版本已移除 pcap 依赖，使用 gopsutil 统计网络流量。系统总流量是精确的，进程级流量是按连接数比例估算的。
+
+### Q: 进程流量加起来不等于总流量？
+A: 正常现象。进程流量是估算值，部分流量来自内核或短连接进程，无法精确分配。
 
 ### Q: CPU IO等待在 Windows 上显示为 0？
 A: 正常现象，Windows 不提供 IO 等待时间指标。

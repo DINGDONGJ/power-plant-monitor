@@ -108,6 +108,11 @@ type commonProvider struct {
 	procCacheMu sync.RWMutex
 	procCache   *processListCache
 
+	// 监听端口缓存
+	listenPortsMu    sync.RWMutex
+	listenPorts      map[int32][]int
+	listenPortsTime  time.Time
+
 	// 进程网络监控
 	netMonitor *netmon.NetMonitor
 
@@ -146,6 +151,7 @@ func newCommonProvider(
 		cpuSamples:         make(map[int32]*cpuSample),
 		sysSample:          &systemSample{sampleTime: time.Now()},
 		procCache:          &processListCache{cacheTTL: 500 * time.Millisecond}, // 500ms 缓存
+		listenPorts:        make(map[int32][]int),
 		numCPU:             numCPU,
 		divideByNumCPU:     divideByNumCPU,
 		matchProcessName:   matchName,
@@ -198,21 +204,6 @@ func (p *commonProvider) sampleSystemMetrics() {
 
 	for range ticker.C {
 		p.collectSystemSample()
-		p.warmupProcessCPU() // 预热所有进程的 CPU 采样缓存
-	}
-}
-
-// warmupProcessCPU 预热所有进程的 CPU 采样缓存
-// 这样 CLI/Web 显示时能读取到准确的 CPU 值，而不是首次采样返回 0
-func (p *commonProvider) warmupProcessCPU() {
-	procs, err := process.Processes()
-	if err != nil {
-		return
-	}
-
-	for _, proc := range procs {
-		// 只调用 calcProcessCPU 来更新缓存，不使用返回值
-		p.calcProcessCPU(proc.Pid, proc)
 	}
 }
 
@@ -676,25 +667,55 @@ func (p *commonProvider) collectAllProcesses() ([]types.ProcessInfo, error) {
 	}
 	p.cpuSamplesMu.Unlock()
 
+	// 清理 netmon 中的进程统计
+	if p.netMonitor != nil {
+		p.netMonitor.CleanupPids(alivePids)
+	}
+
 	return result, nil
 }
 
-// getProcessListenPorts 获取所有进程的监听端口
+// getProcessListenPorts 获取所有进程的监听端口（带缓存，3秒更新一次）
 func (p *commonProvider) getProcessListenPorts() map[int32][]int {
-	result := make(map[int32][]int)
+	p.listenPortsMu.RLock()
+	if time.Since(p.listenPortsTime) < 3*time.Second && len(p.listenPorts) > 0 {
+		// 返回缓存的副本
+		result := make(map[int32][]int, len(p.listenPorts))
+		for k, v := range p.listenPorts {
+			result[k] = v
+		}
+		p.listenPortsMu.RUnlock()
+		return result
+	}
+	p.listenPortsMu.RUnlock()
 
+	// 缓存过期，重新获取
 	conns, err := psnet.Connections("all")
 	if err != nil {
-		return result
+		return p.listenPorts
+	}
+
+	p.listenPortsMu.Lock()
+	defer p.listenPortsMu.Unlock()
+
+	// 清空并复用 map
+	for k := range p.listenPorts {
+		delete(p.listenPorts, k)
 	}
 
 	for _, conn := range conns {
 		if conn.Status == "LISTEN" && conn.Pid != 0 {
 			port := int(conn.Laddr.Port)
-			result[conn.Pid] = append(result[conn.Pid], port)
+			p.listenPorts[conn.Pid] = append(p.listenPorts[conn.Pid], port)
 		}
 	}
+	p.listenPortsTime = time.Now()
 
+	// 返回副本
+	result := make(map[int32][]int, len(p.listenPorts))
+	for k, v := range p.listenPorts {
+		result[k] = v
+	}
 	return result
 }
 

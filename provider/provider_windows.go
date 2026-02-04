@@ -4,6 +4,7 @@ package provider
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -22,6 +23,10 @@ var (
 	procGetFileVersionInfoW     = modversion.NewProc("GetFileVersionInfoW")
 	procGetFileVersionInfoSizeW = modversion.NewProc("GetFileVersionInfoSizeW")
 	procVerQueryValueW          = modversion.NewProc("VerQueryValueW")
+
+	// 文件描述缓存（避免重复调用 Windows API）
+	fileDescCache   = make(map[string]string)
+	fileDescCacheMu sync.RWMutex
 )
 
 const (
@@ -102,12 +107,33 @@ func getProcessPriority(pid int32) int32 {
 	}
 }
 
-// getFileDescription 获取可执行文件的描述信息
+// getFileDescription 获取可执行文件的描述信息（带缓存）
 func getFileDescription(exePath string) string {
 	if exePath == "" {
 		return ""
 	}
 
+	// 先检查缓存
+	fileDescCacheMu.RLock()
+	if desc, ok := fileDescCache[exePath]; ok {
+		fileDescCacheMu.RUnlock()
+		return desc
+	}
+	fileDescCacheMu.RUnlock()
+
+	// 缓存未命中，调用 Windows API
+	desc := getFileDescriptionFromAPI(exePath)
+
+	// 写入缓存
+	fileDescCacheMu.Lock()
+	fileDescCache[exePath] = desc
+	fileDescCacheMu.Unlock()
+
+	return desc
+}
+
+// getFileDescriptionFromAPI 从 Windows API 获取文件描述
+func getFileDescriptionFromAPI(exePath string) string {
 	pathPtr, err := windows.UTF16PtrFromString(exePath)
 	if err != nil {
 		return ""

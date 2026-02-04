@@ -13,6 +13,9 @@ import (
 	"monitor-agent/types"
 )
 
+// TargetChangeCallback 目标变化回调函数类型
+type TargetChangeCallback func(targets []types.MonitorTarget)
+
 // MultiMonitor 多进程监控器
 type MultiMonitor struct {
 	mu             sync.RWMutex
@@ -29,6 +32,9 @@ type MultiMonitor struct {
 
 	// 影响分析器
 	impactAnalyzer *impact.ImpactAnalyzer
+
+	// 目标变化回调（用于持久化配置）
+	targetChangeCallback TargetChangeCallback
 }
 
 type targetState struct {
@@ -78,17 +84,38 @@ func (m *MultiMonitor) GetImpactAnalyzer() *impact.ImpactAnalyzer {
 	return m.impactAnalyzer
 }
 
+// SetTargetChangeCallback 设置目标变化回调
+func (m *MultiMonitor) SetTargetChangeCallback(cb TargetChangeCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.targetChangeCallback = cb
+}
+
+// notifyTargetChange 通知目标变化
+func (m *MultiMonitor) notifyTargetChange() {
+	if m.targetChangeCallback == nil {
+		return
+	}
+	targets := make([]types.MonitorTarget, 0, len(m.targets))
+	for _, state := range m.targets {
+		targets = append(targets, state.target)
+	}
+	// 异步调用回调，避免阻塞
+	go m.targetChangeCallback(targets)
+}
+
 // AddTarget 添加监控目标
 func (m *MultiMonitor) AddTarget(target types.MonitorTarget) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if _, exists := m.targets[target.PID]; exists {
+		m.mu.Unlock()
 		return fmt.Errorf("target PID %d already monitored", target.PID)
 	}
 
 	// 验证进程存在
 	if !m.provider.IsAlive(target.PID) {
+		m.mu.Unlock()
 		return fmt.Errorf("process PID %d not found", target.PID)
 	}
 
@@ -110,13 +137,14 @@ func (m *MultiMonitor) AddTarget(target types.MonitorTarget) error {
 	m.metricsBuffers[target.PID] = buf
 
 	logger.Infof("MONITOR", "Added monitor target: PID=%d Name=%s", target.PID, target.Name)
+	m.notifyTargetChange()
+	m.mu.Unlock()
 	return nil
 }
 
 // RemoveTarget 移除监控目标
 func (m *MultiMonitor) RemoveTarget(pid int32) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	delete(m.targets, pid)
 	delete(m.metricsBuffers, pid)
 
@@ -126,12 +154,13 @@ func (m *MultiMonitor) RemoveTarget(pid int32) {
 	}
 
 	logger.Infof("MONITOR", "Removed monitor target: PID=%d", pid)
+	m.notifyTargetChange()
+	m.mu.Unlock()
 }
 
 // RemoveAllTargets 移除所有监控目标
 func (m *MultiMonitor) RemoveAllTargets() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.targets = make(map[int32]*targetState)
 	m.metricsBuffers = make(map[int32]*buffer.RingBuffer[types.ProcessMetrics])
 
@@ -141,20 +170,24 @@ func (m *MultiMonitor) RemoveAllTargets() {
 	}
 
 	logger.Info("MONITOR", "Removed all monitor targets")
+	m.notifyTargetChange()
+	m.mu.Unlock()
 }
 
 // UpdateTarget 更新监控目标配置
 func (m *MultiMonitor) UpdateTarget(target types.MonitorTarget) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	state, exists := m.targets[target.PID]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("target PID %d not found", target.PID)
 	}
 
 	state.target = target
 	logger.Infof("MONITOR", "Updated monitor target: PID=%d Name=%s", target.PID, target.Name)
+	m.notifyTargetChange()
+	m.mu.Unlock()
 	return nil
 }
 

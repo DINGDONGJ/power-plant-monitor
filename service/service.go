@@ -91,13 +91,20 @@ func NewWithConfig(cfg Config, appCfg *config.Config) (*Service, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Service{
+	s := &Service{
 		config:    cfg,
 		appConfig: appCfg,
 		mm:        mm,
 		ctx:       ctx,
 		cancel:    cancel,
-	}, nil
+	}
+
+	// 设置目标变化回调，自动保存配置
+	mm.SetTargetChangeCallback(func(targets []types.MonitorTarget) {
+		s.saveTargetsToConfig(targets)
+	})
+
+	return s, nil
 }
 
 // Start 启动服务
@@ -229,4 +236,21 @@ func (s *Service) loadTargetsFromConfig() error {
 	}
 
 	return nil
+}
+
+// saveTargetsToConfig 保存监控目标到配置文件
+func (s *Service) saveTargetsToConfig(targets []types.MonitorTarget) {
+	if s.config.ConfigFile == "" {
+		return
+	}
+
+	// 更新内存中的配置
+	s.appConfig.Targets = targets
+
+	// 保存到文件
+	if err := config.SaveConfig(s.config.ConfigFile, s.appConfig); err != nil {
+		logger.Errorf("SERVICE", "Save targets to config failed: %v", err)
+	} else {
+		logger.Infof("SERVICE", "Saved %d targets to config", len(targets))
+	}
 }
